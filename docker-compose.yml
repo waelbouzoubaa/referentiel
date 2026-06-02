@@ -1,0 +1,129 @@
+services:
+
+  # ── Base de données ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: middleware-postgres
+    environment:
+      POSTGRES_USER: middleware
+      POSTGRES_PASSWORD: middleware
+      POSTGRES_DB: middleware
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U middleware"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Stockage objet (MinIO = GCS compatible en dev) ───────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: middleware-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Création du bucket au démarrage ─────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: middleware-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/middleware-dev &&
+      echo 'Bucket middleware-dev créé.'
+      "
+    restart: "no"
+
+  # ── n8n (orchestration) ──────────────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: middleware-n8n
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: admin
+      N8N_BASIC_AUTH_PASSWORD: changeme
+      N8N_HOST: localhost
+      N8N_PORT: 5679
+      WEBHOOK_URL: http://localhost:5679/
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: middleware
+      DB_POSTGRESDB_USER: middleware
+      DB_POSTGRESDB_PASSWORD: middleware
+      DB_POSTGRESDB_SCHEMA: n8n
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./config/n8n:/config/n8n:ro
+    ports:
+      - "5679:5679"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Service Python FastAPI ───────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: middleware-api
+    environment:
+      MIDDLEWARE_DATABASE_URL: postgresql+asyncpg://middleware:middleware@postgres:5432/middleware
+      MIDDLEWARE_STORAGE_ENDPOINT: http://minio:9000
+      MIDDLEWARE_STORAGE_BUCKET: middleware-dev
+      MIDDLEWARE_STORAGE_ACCESS_KEY: minioadmin
+      MIDDLEWARE_STORAGE_SECRET_KEY: minioadmin
+      MIDDLEWARE_DEBUG: "true"
+      MIDDLEWARE_LOG_LEVEL: DEBUG
+      MIDDLEWARE_ENVIRONMENT: development
+      MIDDLEWARE_INPUT_FOLDER: /data/input
+      MIDDLEWARE_OUTPUT_FOLDER: /data/output
+    volumes:
+      - ./src:/app/src:ro          # hot reload en dev
+      - ./data/input:/data/input
+      - ./data/output:/data/output
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: >
+      uvicorn middleware.api.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  minio_data:
+  n8n_data:
+
+networks:
+  default:
+    name: middleware-network

@@ -1,0 +1,69 @@
+supplier_code: "atlantic_scga_eau"
+mapping_version: 1
+description: "Atlantic SCGA — gamme eau chaude sanitaire"
+upload_mode: "full"
+
+sheet_match: "Atlantic 2026"
+header_detection:
+  mode: explicit
+  row: 9
+data_starts_row: 10
+
+extraction_mode: table
+
+row_filter:
+  must_have_value_in: ["B"]
+  exclude_if_starts_with: ["TARIF GROUPE", "Cet accord"]
+
+columns:
+  supplier_product_code:
+    source_col: "B"
+    transform: ["strip", "to_uppercase"]
+    required: true
+  designation:
+    source_col: "C"
+    transform: "strip"
+    required: true
+  family:
+    constant: "Eau chaude sanitaire"
+
+prices:
+  - type: "public"
+    source_col: "E"
+    transform: "parse_decimal_fr"
+    currency: "EUR"
+  - type: "installer"
+    source_col: "F"
+    transform: "parse_decimal_fr"
+    currency: "EUR"
+
+attributes:
+  - key: "quantity_pack"
+    source_col: "D"
+    data_type: "integer"
+  - key: "base_variant"
+    source_col: "A"
+    data_type: "enum"
+    enum_values: ["B", "V"]
+
+file_metadata:
+  validity_start:
+    cell: "C4"
+    transform: "parse_date_iso"
+  validity_end:
+    cell: "C5"
+    transform: "parse_date_iso"
+  contract_reference:
+    regex: "Référence Atlantic (\\d+)"
+    in_cell: "E7"
+
+gery_export:
+  enabled: true
+  flatten_strategy: "cartesian"
+  defaults:
+    item_purchase_type: "Catalogue"
+    minimum_quantity: 1
+    code_tva: "TVA20"
+    unit_of_measure: "U"
+  price_export_mapping:
+    direct_unit_cost: "installer"

@@ -1,0 +1,101 @@
+supplier_code: "airisol"
+mapping_version: 1
+description: "Airisol — étanchéité, matrice de prix multi-paliers / multi-variantes"
+upload_mode: "full"
+
+sheet_match: "Table 1"
+header_detection:
+  mode: explicit
+  row: 9
+data_starts_row: 10
+
+extraction_mode: matrix
+
+row_filter:
+  must_have_value_in: ["C"]
+  must_have_value_in_any: ["G", "I", "K"]
+
+data_zone:
+  rows: "10:31"
+  product_columns: "A:F"
+  price_matrix_columns: "G:L"
+
+product_columns:
+  family:
+    source_col: "A"
+    transform: "strip"
+  subfamily:
+    source_col: "B"
+    transform: "strip"
+  designation:
+    source_col: "C"
+    transform: "strip"
+    required: true
+  supplier_product_code:
+    source_col: "C"
+    transform: "strip"
+    required: true
+
+attributes:
+  - key: "epaisseur"
+    source_col: "E"
+    data_type: "decimal"
+    unit: "mm"
+  - key: "r_value"
+    source_col: "F"
+    data_type: "decimal"
+    unit: "m².K/W"
+
+price_matrix:
+  tier_axis:
+    header_row: 8
+    type: "quantity_range"
+    fallback_unit: "m²"
+    detect_per_block: true
+  variant_axis:
+    header_row: 9
+    dimension_name: "couleur"
+  column_groups:
+    - columns: ["G", "H"]
+      tier_label: "0-500m²"
+      variants: ["ALU", "BLANC"]
+    - columns: ["I", "J"]
+      tier_label: "500-1000m²"
+      variants: ["ALU", "BLANC"]
+    - columns: ["K", "L"]
+      tier_label: ">1000m²"
+      variants: ["ALU", "BLANC"]
+  price_type: "list"
+  currency: "EUR"
+  transform: "parse_decimal_fr"
+
+commercial_rules:
+  - source_col: "M"
+    rule_type: "franco"
+    threshold_unit: "m²"
+    parse_pattern: "(\\d+)\\s*m²"
+    applies_to: "product"
+
+file_metadata:
+  validity_start:
+    cell: "E4"
+    transform: "parse_date_iso"
+  validity_end:
+    cell: "J4"
+    transform: "parse_date_iso"
+  client_article_code:
+    regex: "Code article Ramery\\s*:\\s*(\\d+)"
+    in_cell: "A6"
+
+gery_export:
+  enabled: true
+  flatten_strategy: "cartesian"
+  derived_code_template: "{supplier_product_code}-{variant_code}-T{tier_index}"
+  description_template: "{designation} — {variant_value} — {tier_label}"
+  defaults:
+    item_purchase_type: "Catalogue"
+    minimum_quantity: 1
+    code_tva: "TVA20"
+    unit_of_measure: "M2"
+  price_export_mapping:
+    direct_unit_cost: "list"
