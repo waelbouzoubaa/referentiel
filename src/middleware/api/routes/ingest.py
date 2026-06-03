@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-import requests as http_requests
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -75,7 +75,7 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
     reject_url = f"{API_BASE_URL}/api/v1/review/{pending_id}/reject"
 
     try:
-        http_requests.post(
+        httpx.post(
             N8N_WEBHOOK_URL,
             json={
                 "pending_id": pending_id,
