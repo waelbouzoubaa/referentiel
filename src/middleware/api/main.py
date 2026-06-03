@@ -47,9 +47,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from middleware.api.routes import health, suppliers
+    from middleware.api.routes import health, suppliers, processing, products
     app.include_router(health.router)
     app.include_router(suppliers.router, prefix="/suppliers", tags=["fournisseurs"])
+    app.include_router(processing.router, prefix="/api/v1", tags=["traitement"])
+    app.include_router(products.router, prefix="/products", tags=["produits"])
 
     return app
 
