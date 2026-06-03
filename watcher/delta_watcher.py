@@ -179,12 +179,21 @@ def _download_file(item) -> bytes:
 
 
 def _resolve_supplier_code(item) -> str | None:
+    name = item.get("name", "").lower()
     parent_path = item.get("parentReference", {}).get("path", "")
     if "root:" in parent_path:
         folder = parent_path.split("root:")[-1].strip("/").split("/")[-1]
     else:
         folder = parent_path.strip("/").split("/")[-1]
-    return FOLDER_TO_SUPPLIER.get(folder.lower())
+
+    code = FOLDER_TO_SUPPLIER.get(folder.lower())
+
+    # Atlantic : distingue chauffage vs eau par le nom du fichier
+    if code == "atlantic_scga_chauffage":
+        if any(kw in name for kw in ("eau", "sanitaire", "thermodynamique")):
+            code = "atlantic_scga_eau"
+
+    return code
 
 
 def run():
