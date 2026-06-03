@@ -29,8 +29,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"   # API S3
-      - "9001:9001"   # Console web
+      - "9010:9000"   # API S3 (9000 occupé par Portainer)
+      - "9011:9001"   # Console web
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
