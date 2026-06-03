@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMPTZ
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0003"
 down_revision = "0002"
@@ -28,9 +28,9 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(64), nullable=False),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("gcs_path", sa.String(), nullable=False),
-        sa.Column("received_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("processing_started_at", TIMESTAMPTZ()),
-        sa.Column("processing_ended_at", TIMESTAMPTZ()),
+        sa.Column("received_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("processing_started_at", sa.DateTime(timezone=True)),
+        sa.Column("processing_ended_at", sa.DateTime(timezone=True)),
         sa.Column("status", sa.String(), nullable=False, server_default="received"),
         sa.Column("error_message", sa.Text()),
         sa.Column("validity_start", sa.Date()),

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ
 
 revision = "0004"
 down_revision = "0003"
@@ -32,8 +31,8 @@ def upgrade() -> None:
         sa.Column("first_seen_in_file_id", sa.UUID(), sa.ForeignKey("supplier_files.id", ondelete="SET NULL")),
         sa.Column("last_seen_in_file_id", sa.UUID(), sa.ForeignKey("supplier_files.id", ondelete="SET NULL")),
         sa.Column("business_hash", sa.String(64), nullable=False),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("updated_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.UniqueConstraint("supplier_id", "supplier_product_code", name="uq_products_supplier_code"),
         sa.CheckConstraint("product_kind IN ('physical','service')", name="chk_products_kind"),
         sa.CheckConstraint("status IN ('active','inactive','deleted')", name="chk_products_status"),
@@ -54,7 +53,7 @@ def upgrade() -> None:
         sa.Column("variant_value", sa.String(), nullable=False),
         sa.Column("variant_code", sa.String(), nullable=False),
         sa.Column("display_order", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.UniqueConstraint(
             "product_id", "variant_dimension", "variant_code",
             name="uq_product_variants_product_dim_val",
@@ -70,7 +69,7 @@ def upgrade() -> None:
         sa.Column("attribute_value", sa.Text(), nullable=False),
         sa.Column("data_type", sa.String(), nullable=False),
         sa.Column("unit", sa.String()),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.UniqueConstraint("product_id", "attribute_key", name="uq_product_attributes_product_key"),
         sa.CheckConstraint(
             "data_type IN ('string','integer','decimal','enum','duration','boolean')",

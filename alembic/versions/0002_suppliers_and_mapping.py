@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ
 
 revision = "0002"
 down_revision = "0001"
@@ -28,8 +27,8 @@ def upgrade() -> None:
         sa.Column("upload_mode", sa.String(), nullable=False, server_default="incremental"),
         sa.Column("active", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("notes", sa.Text()),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("updated_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.UniqueConstraint("code", name="uq_suppliers_code"),
         sa.UniqueConstraint("sharepoint_folder", name="uq_suppliers_sharepoint_folder"),
         sa.CheckConstraint("upload_mode IN ('full', 'incremental')", name="chk_suppliers_upload_mode"),
@@ -45,8 +44,8 @@ def upgrade() -> None:
         sa.Column("yaml_hash", sa.String(64), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("validated_by", sa.String()),
-        sa.Column("validated_at", TIMESTAMPTZ()),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("validated_at", sa.DateTime(timezone=True)),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.UniqueConstraint("supplier_id", "version", name="uq_mapping_rules_supplier_version"),
         sa.UniqueConstraint("yaml_hash", name="uq_mapping_rules_yaml_hash"),
     )

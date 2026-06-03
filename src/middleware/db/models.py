@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
+    DateTime,
     ForeignKey,
     Integer,
     Numeric,
@@ -16,7 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMPTZ
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from middleware.db.base import Base
@@ -42,8 +43,8 @@ class Supplier(Base):
     upload_mode: Mapped[str] = mapped_column(String, nullable=False, default="incremental")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     mapping_rules: Mapped[list[MappingRule]] = relationship(back_populates="supplier")
     files: Mapped[list[SupplierFile]] = relationship(back_populates="supplier")
@@ -70,8 +71,8 @@ class MappingRule(Base):
     yaml_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     validated_by: Mapped[str | None] = mapped_column(String)
-    validated_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     supplier: Mapped[Supplier] = relationship(back_populates="mapping_rules")
     files: Mapped[list[SupplierFile]] = relationship(back_populates="mapping_rule")
@@ -101,9 +102,9 @@ class SupplierFile(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gcs_path: Mapped[str] = mapped_column(String, nullable=False)
-    received_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
-    processing_started_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
-    processing_ended_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String, nullable=False, default="received")
     error_message: Mapped[str | None] = mapped_column(Text)
     validity_start: Mapped[date | None] = mapped_column(Date)
@@ -154,8 +155,8 @@ class Product(Base):
         ForeignKey("supplier_files.id", ondelete="SET NULL")
     )
     business_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     supplier: Mapped[Supplier] = relationship(back_populates="products")
     first_seen_file: Mapped[SupplierFile | None] = relationship(
@@ -189,7 +190,7 @@ class ProductVariant(Base):
     variant_value: Mapped[str] = mapped_column(String, nullable=False)
     variant_code: Mapped[str] = mapped_column(String, nullable=False)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     product: Mapped[Product] = relationship(back_populates="variants")
     prices: Mapped[list[Price]] = relationship(back_populates="variant")
@@ -217,7 +218,7 @@ class ProductAttribute(Base):
     attribute_value: Mapped[str] = mapped_column(Text, nullable=False)
     data_type: Mapped[str] = mapped_column(String, nullable=False)
     unit: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     product: Mapped[Product] = relationship(back_populates="attributes")
 
@@ -254,7 +255,7 @@ class Price(Base):
     source_file_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("supplier_files.id", ondelete="RESTRICT"), nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     product: Mapped[Product] = relationship(back_populates="prices")
     variant: Mapped[ProductVariant | None] = relationship(back_populates="prices")
@@ -279,7 +280,7 @@ class CommercialRule(Base):
     threshold_unit: Mapped[str | None] = mapped_column(String)
     description: Mapped[str | None] = mapped_column(Text)
     raw_text: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     product: Mapped[Product | None] = relationship(back_populates="commercial_rules")
 
@@ -306,8 +307,8 @@ class ProductHistory(Base):
     source_file_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("supplier_files.id", ondelete="RESTRICT"), nullable=False
     )
-    detected_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
-    exported_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exported_in_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("gery_exports.id", ondelete="SET NULL")
     )
@@ -334,8 +335,8 @@ class GeryExport(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     export_kind: Mapped[str] = mapped_column(String, nullable=False)
-    generated_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
-    delivered_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     output_path: Mapped[str] = mapped_column(String, nullable=False)
     output_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     line_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -400,12 +401,12 @@ class MappingSuggestion(Base):
     warnings: Mapped[list[Any] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     reviewed_by: Mapped[str | None] = mapped_column(String)
-    reviewed_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     approved_yaml: Mapped[str | None] = mapped_column(Text)
     resulting_mapping_rule_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("mapping_rules.id", ondelete="SET NULL")
     )
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 # ── Erreurs de traitement ─────────────────────────────────────────────────────
@@ -430,6 +431,6 @@ class ProcessingError(Base):
     error_field: Mapped[str | None] = mapped_column(String)
     error_detail: Mapped[str] = mapped_column(Text, nullable=False)
     raw_value: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     supplier_file: Mapped[SupplierFile] = relationship(back_populates="processing_errors")

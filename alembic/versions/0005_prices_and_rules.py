@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import TIMESTAMPTZ
 
 revision = "0005"
 down_revision = "0004"
@@ -32,7 +31,7 @@ def upgrade() -> None:
         sa.Column("valid_from", sa.Date()),
         sa.Column("valid_to", sa.Date()),
         sa.Column("source_file_id", sa.UUID(), sa.ForeignKey("supplier_files.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.CheckConstraint("amount >= 0", name="chk_prices_amount_positive"),
         sa.CheckConstraint(
             "valid_from IS NULL OR valid_to IS NULL OR valid_from <= valid_to",
@@ -53,7 +52,7 @@ def upgrade() -> None:
         sa.Column("threshold_unit", sa.String()),
         sa.Column("description", sa.Text()),
         sa.Column("raw_text", sa.Text()),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
     )
     op.create_index("idx_commercial_rules_product", "commercial_rules", ["product_id"])
 

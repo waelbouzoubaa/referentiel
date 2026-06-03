@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMPTZ
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0007"
 down_revision = "0006"
@@ -28,10 +28,10 @@ def upgrade() -> None:
         sa.Column("warnings", JSONB()),
         sa.Column("status", sa.String(), nullable=False, server_default="pending"),
         sa.Column("reviewed_by", sa.String()),
-        sa.Column("reviewed_at", TIMESTAMPTZ()),
+        sa.Column("reviewed_at", sa.DateTime(timezone=True)),
         sa.Column("approved_yaml", sa.Text()),
         sa.Column("resulting_mapping_rule_id", sa.UUID(), sa.ForeignKey("mapping_rules.id", ondelete="SET NULL")),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.CheckConstraint(
             "status IN ('pending','approved','rejected','modified')",
             name="chk_mapping_suggestions_status",
@@ -53,7 +53,7 @@ def upgrade() -> None:
         sa.Column("error_field", sa.String()),
         sa.Column("error_detail", sa.Text(), nullable=False),
         sa.Column("raw_value", sa.Text()),
-        sa.Column("created_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
         sa.CheckConstraint(
             "error_type IN ('parse_error','validation_error','mapping_error','transform_error')",
             name="chk_processing_errors_type",

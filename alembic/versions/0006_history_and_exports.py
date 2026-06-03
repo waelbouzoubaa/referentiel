@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMPTZ
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0006"
 down_revision = "0005"
@@ -22,8 +22,8 @@ def upgrade() -> None:
         "gery_exports",
         sa.Column("id", sa.UUID(), primary_key=True),
         sa.Column("export_kind", sa.String(), nullable=False),
-        sa.Column("generated_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("delivered_at", TIMESTAMPTZ()),
+        sa.Column("generated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("delivered_at", sa.DateTime(timezone=True)),
         sa.Column("output_path", sa.String(), nullable=False),
         sa.Column("output_hash", sa.String(64), nullable=False),
         sa.Column("line_count", sa.Integer(), nullable=False),
@@ -48,8 +48,8 @@ def upgrade() -> None:
         sa.Column("change_type", sa.String(), nullable=False),
         sa.Column("field_changes", JSONB()),
         sa.Column("source_file_id", sa.UUID(), sa.ForeignKey("supplier_files.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("detected_at", TIMESTAMPTZ(), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("exported_at", TIMESTAMPTZ()),
+        sa.Column("detected_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column("exported_at", sa.DateTime(timezone=True)),
         sa.Column("exported_in_id", sa.UUID(), sa.ForeignKey("gery_exports.id", ondelete="SET NULL")),
         sa.CheckConstraint(
             "change_type IN ('CREATE','UPDATE','PRICE_CHANGE','DELETE','REACTIVATE')",
