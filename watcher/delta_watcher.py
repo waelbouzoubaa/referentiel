@@ -111,7 +111,7 @@ def _trigger_middleware(item):
 
     supplier_code = _resolve_supplier_code(item)
     if supplier_code is None:
-        print(f"  → Dossier non mappé pour '{name}' — ajoutez-le dans FOLDER_TO_SUPPLIER.")
+        _handle_unknown_supplier(item)
         return
 
     print(f"  → Téléchargement '{name}' → fournisseur '{supplier_code}'...")
@@ -176,6 +176,49 @@ def _download_file(item) -> bytes:
     )
     resp.raise_for_status()
     return resp.content
+
+
+def _handle_unknown_supplier(item):
+    """Fournisseur inconnu : télécharge le fichier et l'envoie pour analyse IA + validation humaine."""
+    name = item.get("name", "inconnu")
+    parent_path = item.get("parentReference", {}).get("path", "")
+    if "root:" in parent_path:
+        folder = parent_path.split("root:")[-1].strip("/").split("/")[-1]
+    else:
+        folder = parent_path.strip("/").split("/")[-1]
+
+    print(f"  → Fournisseur inconnu pour '{name}' (dossier: '{folder}') — analyse IA en cours...")
+
+    try:
+        file_bytes = _download_file(item)
+    except Exception as exc:
+        print(f"  → Erreur téléchargement : {exc}")
+        return
+
+    pending_id = uuid.uuid4().hex
+    suffix = Path(name).suffix
+    pending_dir = Path(UPLOADS_DIR) / "pending"
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    file_path = pending_dir / f"{pending_id}{suffix}"
+    file_path.write_bytes(file_bytes)
+
+    try:
+        resp = requests.post(
+            f"{MIDDLEWARE_API_URL}/api/v1/ingest/unknown",
+            json={
+                "filename": name,
+                "folder_name": folder,
+                "file_path": str(file_path),
+                "pending_id": pending_id,
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"  → Envoyé pour validation. Fournisseur suggéré : '{data['supplier_guess']}' (ID: {pending_id})")
+    except Exception as exc:
+        print(f"  → Erreur envoi analyse IA : {exc}")
+        file_path.unlink(missing_ok=True)
 
 
 def _resolve_supplier_code(item) -> str | None:

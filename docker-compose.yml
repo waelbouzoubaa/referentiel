@@ -97,9 +97,12 @@ services:
       MIDDLEWARE_ENVIRONMENT: development
       MIDDLEWARE_INPUT_FOLDER: /data/input
       MIDDLEWARE_OUTPUT_FOLDER: /data/output
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      N8N_WEBHOOK_URL: http://n8n:5679/webhook/pending-config
+      MIDDLEWARE_API_URL: http://localhost:8000
     volumes:
       - ./src:/app/src:ro
-      - ./config:/app/config:ro
+      - ./config:/app/config
       - ./data/input:/data/input
       - ./data/output:/data/output
       - uploads:/app/uploads

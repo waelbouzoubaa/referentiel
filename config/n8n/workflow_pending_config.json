@@ -1,0 +1,58 @@
+{
+  "name": "Validation YAML fournisseur",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pending-config",
+        "responseMode": "onReceived",
+        "responseData": "allEntries"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst yaml = d.yaml_proposed || '';\nconst preview = yaml.length > 800 ? yaml.substring(0, 800) + '\\n...(tronqué)' : yaml;\nreturn [{\n  json: {\n    ...d,\n    yaml_preview: preview,\n    subject: `[Middleware Ramery] Nouveau fournisseur à valider : ${d.supplier_guess}`,\n    body_html: `<html><body style=\"font-family:sans-serif;max-width:700px;margin:0 auto\">\n<h2 style=\"color:#1a7f5a\">Nouveau fournisseur détecté</h2>\n<table style=\"width:100%;border-collapse:collapse\">\n<tr><td style=\"padding:6px;font-weight:bold\">Fichier :</td><td>${d.filename}</td></tr>\n<tr><td style=\"padding:6px;font-weight:bold\">Dossier SharePoint :</td><td>${d.folder_name}</td></tr>\n<tr><td style=\"padding:6px;font-weight:bold\">Fournisseur suggéré :</td><td><strong>${d.supplier_guess}</strong></td></tr>\n</table>\n<h3>YAML proposé par l'IA</h3>\n<pre style=\"background:#f5f5f5;padding:16px;border-radius:4px;font-size:13px;overflow:auto\">${preview}</pre>\n<p>Veuillez valider ou rejeter cette configuration :</p>\n<p>\n<a href=\"${d.approve_url}\" style=\"background:#1a7f5a;color:white;padding:12px 24px;border-radius:4px;text-decoration:none;margin-right:16px\">✓ Approuver</a>\n<a href=\"${d.reject_url}\" style=\"background:#c0392b;color:white;padding:12px 24px;border-radius:4px;text-decoration:none\">✗ Rejeter</a>\n</p>\n<p style=\"color:#888;font-size:12px\">ID : ${d.pending_id}</p>\n</body></html>`\n  }\n}];"
+      },
+      "id": "format-email",
+      "name": "Formater email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.from_email || 'noreply@maikhub.com' }}",
+        "toEmail": "cds@maikhub.com",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.body_html }}"
+      },
+      "id": "send-email",
+      "name": "Envoyer email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP Gmail"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{"node": "Formater email", "type": "main", "index": 0}]]
+    },
+    "Formater email": {
+      "main": [[{"node": "Envoyer email", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {}
+}
