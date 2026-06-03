@@ -137,6 +137,7 @@ services:
     environment:
       MIDDLEWARE_API_URL: http://api:8000
       UPLOADS_DIR: /app/uploads
+      PYTHONUNBUFFERED: "1"
     volumes:
       - uploads:/app/uploads
       - watcher_state:/app/state
