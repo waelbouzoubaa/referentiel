@@ -98,9 +98,12 @@ services:
       MIDDLEWARE_INPUT_FOLDER: /data/input
       MIDDLEWARE_OUTPUT_FOLDER: /data/output
     volumes:
-      - ./src:/app/src:ro          # hot reload en dev
+      - ./src:/app/src:ro
+      - ./config:/app/config:ro
       - ./data/input:/data/input
       - ./data/output:/data/output
+      - uploads:/app/uploads
+      - exports:/app/exports
     ports:
       - "8000:8000"
     depends_on:
@@ -119,10 +122,33 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Watcher SharePoint ───────────────────────────────────────────────────────
+  watcher:
+    build:
+      context: ./watcher
+      dockerfile: Dockerfile
+    container_name: middleware-watcher
+    env_file:
+      - .env
+    environment:
+      MIDDLEWARE_API_URL: http://api:8000
+      UPLOADS_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+      - watcher_state:/app/state
+    working_dir: /app/state
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   minio_data:
   n8n_data:
+  uploads:
+  exports:
+  watcher_state:
 
 networks:
   default:
