@@ -62,6 +62,7 @@ services:
       N8N_BASIC_AUTH_PASSWORD: changeme
       N8N_HOST: localhost
       N8N_PORT: 5679
+      N8N_SECURE_COOKIE: "false"
       WEBHOOK_URL: http://localhost:5679/
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
