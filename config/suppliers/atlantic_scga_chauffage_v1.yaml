@@ -69,5 +69,13 @@ gery_export:
     minimum_quantity: 1
     code_tva: "TVA20"
     unit_of_measure: "U"
+    purchase_type: "Direct"
+    article_generique: ""
+    gen_prod_posting_group: ""
+    job_cost_code: ""
+    tree_code: ""
+    master_code: ""
+    item_category_code: ""
+    product_group_code: ""
   price_export_mapping:
     direct_unit_cost: "installer"
