@@ -140,7 +140,6 @@ services:
     volumes:
       - uploads:/app/uploads
       - watcher_state:/app/state
-    working_dir: /app/state
     depends_on:
       api:
         condition: service_healthy
