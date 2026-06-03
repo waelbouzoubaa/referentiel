@@ -181,7 +181,7 @@ def _download_file(item) -> bytes:
 def _resolve_supplier_code(item) -> str | None:
     parent_path = item.get("parentReference", {}).get("path", "")
     if "root:" in parent_path:
-        folder = parent_path.split("root:")[-1].strip("/").split("/")[0]
+        folder = parent_path.split("root:")[-1].strip("/").split("/")[-1]
     else:
         folder = parent_path.strip("/").split("/")[-1]
     return FOLDER_TO_SUPPLIER.get(folder.lower())
