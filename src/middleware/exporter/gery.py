@@ -249,48 +249,20 @@ def _write_excel(path: Path, sheet_name: str, columns: list[str], rows: list[dic
     ws = wb.active
     ws.title = sheet_name
 
-    # Colonne A = labels, colonnes B+ = données (décalage +1)
-    def _col(col_name: str) -> int:
-        return columns.index(col_name) + 2  # +1 pour label, +1 pour base 1
-
-    # ── Ligne 1 : en-têtes colonnes ──
-    ws.cell(row=1, column=1, value="Champ").font = _LABEL_FONT
-    for idx, col_name in enumerate(columns, start=2):
-        cell = ws.cell(row=1, column=idx, value=col_name)
+    # Ligne 1 : en-têtes
+    for col_idx, col_name in enumerate(columns, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
 
-    # ── Ligne 2 : obligatoire O/N ──
-    ws.cell(row=2, column=1, value="Obligatoire O/N").font = _LABEL_FONT
-    for idx, col_name in enumerate(columns, start=2):
-        ws.cell(row=2, column=idx, value="O" if col_name in _MANDATORY else "")
+    # Ligne 2+ : données
+    for row_idx, row_data in enumerate(rows, start=2):
+        for col_idx, col_name in enumerate(columns, start=1):
+            ws.cell(row=row_idx, column=col_idx, value=row_data.get(col_name))
 
-    # ── Ligne 3 : règle de gestion ──
-    ws.cell(row=3, column=1, value="Règle de gestion").font = _LABEL_FONT
-    for idx, col_name in enumerate(columns, start=2):
-        ws.cell(row=3, column=idx, value=_RULES.get(col_name, ""))
-
-    # ── Ligne 4 : clé d'unicité ──
-    ws.cell(row=4, column=2, value="Clé d'unicité pour gestion création/modification : frns+ref ext")
-
-    # ── Lignes 5-6 : exemples ──
-    for ex_idx, example in enumerate(_EXAMPLES, start=5):
-        ws.cell(row=ex_idx, column=1, value="Exemple" if ex_idx == 5 else "")
-        for idx, col_name in enumerate(columns, start=2):
-            ws.cell(row=ex_idx, column=idx, value=example.get(col_name, ""))
-
-    # ── Lignes 7-11 : vides (séparateur) ──
-
-    # ── Lignes 12+ : données réelles ──
-    for row_idx, row_data in enumerate(rows, start=_DATA_START_ROW):
-        for idx, col_name in enumerate(columns, start=2):
-            ws.cell(row=row_idx, column=idx, value=row_data.get(col_name))
-
-    # Largeur colonnes
-    ws.column_dimensions["A"].width = 20
-    for idx, col_name in enumerate(columns, start=2):
+    for col_idx, col_name in enumerate(columns, start=1):
         ws.column_dimensions[
-            openpyxl.utils.get_column_letter(idx)
+            openpyxl.utils.get_column_letter(col_idx)
         ].width = max(len(col_name) + 2, 16)
 
     wb.save(path)
