@@ -33,7 +33,7 @@ class GeneratedFile:
 @dataclass
 class GeryExportResult:
     files: list[GeneratedFile] = field(default_factory=list)
-    generated_at: datetime = field(default_factory=datetime.utcnow)
+    generated_at: datetime = field(default_factory=datetime.utcnow)  # noqa: F841
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -82,7 +82,6 @@ def generate_gery_exports(
     result = GeryExportResult()
     defaults = export_config.defaults
     price_field = export_config.price_export_mapping.direct_unit_cost
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
     # Créations + réactivations → NEW_ARTICLE
     rows = _build_rows(
@@ -94,7 +93,7 @@ def generate_gery_exports(
     )
 
     if rows:
-        path = output_dir / f"NEW_ARTICLE_{supplier_code}_{timestamp}.xlsx"
+        path = output_dir / f"NEW_ARTICLE_{supplier_code}.xlsx"
         _write_excel(path, "NEW_ARTICLE", NEW_ARTICLE_COLS, rows)
         result.files.append(GeneratedFile(
             kind="NEW_ARTICLE",
