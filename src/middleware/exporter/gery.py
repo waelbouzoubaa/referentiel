@@ -192,11 +192,56 @@ def _find_price(prices: list[PricePivot], price_type: str) -> PricePivot | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Template Gery : métadonnées figées en tête de fichier
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MANDATORY = {
+    "Code Fournisseur SAGE", "Code article Frns", "Description",
+    "Article générique associé", "Item Purchase Type", "Unité", "Code TVA", "Minimum Quantity",
+}
+
+_RULES: dict[str, str] = {
+    "Code Fournisseur SAGE": "Absent des fichiers fournisseur > Récupération du code Frns Gery à l'import",
+    "Article générique associé": "Permet d'hériter des valeurs communes. Traitement à l'import dans GERY",
+    "Gen. Prod. Posting Group": "Heritage de l'article générique",
+    "Item Purchase Type": 'Constante = "Catalogue". Donc géré à l\'import',
+    "Starting Date": "Date du jour de l'import si pas de date",
+    "Minimum Quantity": "Valeur par défaut de 1 si vide",
+}
+
+_EXAMPLES = [
+    {
+        "Code Fournisseur SAGE": "06180040", "Code article Frns": "05808",
+        "Description": "TUBE PVC NF ME D250 4M", "Article générique associé": "1150",
+        "Gen. Prod. Posting Group": "A601100", "Job Cost Code": "A601100", "Tree Code": "A601100",
+        "Purchase Type": "Direct", "Master Code": "MAT VRD", "Item Category Code": "VOIRIE",
+        "Product Group Code": "BORDURES E", "Item Purchase Type": "Catalogue",
+        "Unité": "M", "Code TVA": "TVA20", "Starting Date": "1/3/2025",
+        "Minimum Quantity": 1, "Direct Unit Cost": "16,44 €", "Ending Date": "1/3/2026",
+    },
+    {
+        "Code Fournisseur SAGE": "06180040", "Code article Frns": "05701",
+        "Description": "TUBE PVC NF ME D 40 4M",
+        "Article générique associé": "1150 [VOIRIE ET RESEAUX DIVERS]",
+        "Gen. Prod. Posting Group": "A601100", "Job Cost Code": "A601100", "Tree Code": "A601100",
+        "Purchase Type": "Direct", "Master Code": "MAT VRD", "Item Category Code": "VOIRIE",
+        "Product Group Code": "BORDURES E", "Item Purchase Type": "Catalogue",
+        "Unité": "M", "Code TVA": "TVA20", "Starting Date": "1/3/2025",
+        "Minimum Quantity": 1, "Direct Unit Cost": "1,20 €", "Ending Date": "1/3/2026",
+    },
+]
+
+# Ligne à partir de laquelle les données réelles commencent
+_DATA_START_ROW = 12
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Écriture Excel
 # ─────────────────────────────────────────────────────────────────────────────
 
 _HEADER_FILL = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
+_LABEL_FONT = Font(bold=True)
 
 
 def _write_excel(path: Path, sheet_name: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
@@ -204,18 +249,48 @@ def _write_excel(path: Path, sheet_name: str, columns: list[str], rows: list[dic
     ws = wb.active
     ws.title = sheet_name
 
-    for col_idx, col_name in enumerate(columns, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=col_name)
+    # Colonne A = labels, colonnes B+ = données (décalage +1)
+    def _col(col_name: str) -> int:
+        return columns.index(col_name) + 2  # +1 pour label, +1 pour base 1
+
+    # ── Ligne 1 : en-têtes colonnes ──
+    ws.cell(row=1, column=1, value="Champ").font = _LABEL_FONT
+    for idx, col_name in enumerate(columns, start=2):
+        cell = ws.cell(row=1, column=idx, value=col_name)
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
 
-    for row_idx, row_data in enumerate(rows, start=2):
-        for col_idx, col_name in enumerate(columns, start=1):
-            ws.cell(row=row_idx, column=col_idx, value=row_data.get(col_name))
+    # ── Ligne 2 : obligatoire O/N ──
+    ws.cell(row=2, column=1, value="Obligatoire O/N").font = _LABEL_FONT
+    for idx, col_name in enumerate(columns, start=2):
+        ws.cell(row=2, column=idx, value="O" if col_name in _MANDATORY else "")
 
-    for col_idx, col_name in enumerate(columns, start=1):
+    # ── Ligne 3 : règle de gestion ──
+    ws.cell(row=3, column=1, value="Règle de gestion").font = _LABEL_FONT
+    for idx, col_name in enumerate(columns, start=2):
+        ws.cell(row=3, column=idx, value=_RULES.get(col_name, ""))
+
+    # ── Ligne 4 : clé d'unicité ──
+    ws.cell(row=4, column=2, value="Clé d'unicité pour gestion création/modification : frns+ref ext")
+
+    # ── Lignes 5-6 : exemples ──
+    for ex_idx, example in enumerate(_EXAMPLES, start=5):
+        ws.cell(row=ex_idx, column=1, value="Exemple" if ex_idx == 5 else "")
+        for idx, col_name in enumerate(columns, start=2):
+            ws.cell(row=ex_idx, column=idx, value=example.get(col_name, ""))
+
+    # ── Lignes 7-11 : vides (séparateur) ──
+
+    # ── Lignes 12+ : données réelles ──
+    for row_idx, row_data in enumerate(rows, start=_DATA_START_ROW):
+        for idx, col_name in enumerate(columns, start=2):
+            ws.cell(row=row_idx, column=idx, value=row_data.get(col_name))
+
+    # Largeur colonnes
+    ws.column_dimensions["A"].width = 20
+    for idx, col_name in enumerate(columns, start=2):
         ws.column_dimensions[
-            openpyxl.utils.get_column_letter(col_idx)
+            openpyxl.utils.get_column_letter(idx)
         ].width = max(len(col_name) + 2, 16)
 
     wb.save(path)
