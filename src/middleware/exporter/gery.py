@@ -41,20 +41,11 @@ class GeryExportResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 NEW_ARTICLE_COLS = [
-    "Code Fournisseur SAGE",       # null — alimenté depuis la base Gery à l'import
+    "Code Fournisseur SAGE",
     "Code article Frns",
     "Description",
     "Article générique associé",
-    "Gen. Prod. Posting Group",
-    "Job Cost Code",
-    "Tree Code",
-    "Purchase Type",
-    "Master Code",
-    "Item Category Code",
-    "Product Group Code",
-    "Item Purchase Type",
     "Unité",
-    "Code TVA",
     "Starting Date",
     "Minimum Quantity",
     "Direct Unit Cost",
