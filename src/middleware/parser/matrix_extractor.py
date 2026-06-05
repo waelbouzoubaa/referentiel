@@ -70,7 +70,7 @@ def parse_matrix_file(path: Path, rule: MappingRule) -> ParsingResult:
         if not _row_passes_filter(row, config.row_filter):
             continue
 
-        active_groups = tier_block_map.get(row_number, config.column_groups) if tier_block_map else config.column_groups
+        active_groups = tier_block_map.get(row_number, config.price_matrix.column_groups) if tier_block_map else config.price_matrix.column_groups
 
         try:
             product = _extract_matrix_product(row, row_number, rule.supplier_code, config, active_groups)
@@ -122,9 +122,9 @@ def _build_tier_block_map(
         return {}
 
     desig_idx = col_letter_to_idx(desig_mapping.source_col)
-    first_col_indices = [col_letter_to_idx(g.columns[0]) for g in config.column_groups]
+    first_col_indices = [col_letter_to_idx(g.columns[0]) for g in config.price_matrix.column_groups]
 
-    current_groups: list[ColumnGroup] = list(config.column_groups)
+    current_groups: list[ColumnGroup] = list(config.price_matrix.column_groups)
     row_to_groups: dict[int, list[ColumnGroup]] = {}
 
     for row_0 in range(row_start - 1, row_end):
@@ -138,14 +138,14 @@ def _build_tier_block_map(
 
         if desig_empty:
             tier_labels = _try_read_tier_labels(row, first_col_indices)
-            if tier_labels and len(tier_labels) == len(config.column_groups):
+            if tier_labels and len(tier_labels) == len(config.price_matrix.column_groups):
                 current_groups = [
                     ColumnGroup(
                         columns=g.columns,
                         tier_label=tier_labels[i],
                         variants=g.variants,
                     )
-                    for i, g in enumerate(config.column_groups)
+                    for i, g in enumerate(config.price_matrix.column_groups)
                 ]
         else:
             row_to_groups[row_number] = current_groups
@@ -193,7 +193,7 @@ def _extract_matrix_product(
 ) -> ProductPivot:
     """Extrait un ProductPivot avec ses variantes/prix depuis une ligne de la matrice."""
     if column_groups is None:
-        column_groups = config.column_groups
+        column_groups = config.price_matrix.column_groups
 
     fields: dict[str, Any] = {}
     for field_name, col_mapping in config.product_columns.items():
