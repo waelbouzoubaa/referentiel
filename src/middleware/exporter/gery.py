@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-import uuid
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +11,13 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill
 
 from middleware.core.logging import get_logger
-from middleware.delta.engine import ChangeType, DeltaResult, ProductDelta
+from middleware.delta.engine import DeltaResult, ProductDelta
 from middleware.parser.grammar import GeryExportConfig
-from middleware.parser.pivot import PricePivot, ProductPivot, VariantPivot
+from middleware.parser.pivot import PricePivot, ProductPivot
 
 logger = get_logger(__name__)
+
+_FIELD_RE = re.compile(r"\{(\w+)\}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Résultat de génération
@@ -73,12 +74,13 @@ def generate_gery_exports(
     result = GeryExportResult()
     defaults = export_config.defaults
     price_field = export_config.price_export_mapping.direct_unit_cost
+    code_template = export_config.derived_code_template
 
-    # Créations + réactivations → NEW_ARTICLE
     rows = _build_rows(
         delta.creates + delta.reactivates,
         defaults,
         price_field,
+        code_template,
         validity_start,
         validity_end,
     )
@@ -93,11 +95,7 @@ def generate_gery_exports(
             output_hash=_file_hash(path),
         ))
 
-    logger.info(
-        "export Gery généré",
-        supplier_code=supplier_code,
-        lignes=len(rows),
-    )
+    logger.info("export Gery généré", supplier_code=supplier_code, lignes=len(rows))
     return result
 
 
@@ -109,6 +107,7 @@ def _build_rows(
     deltas: list[ProductDelta],
     defaults: dict[str, Any],
     price_field: str,
+    code_template: str | None,
     validity_start: date | None,
     validity_end: date | None,
 ) -> list[dict[str, Any]]:
@@ -117,22 +116,13 @@ def _build_rows(
         if delta.new_product is None:
             continue
         p = delta.new_product
-        for derived_code, price in _get_codes_with_prices(p, price_field):
+        for derived_code, price in _get_codes_with_prices(p, price_field, code_template):
             rows.append({
                 "Code Fournisseur SAGE": None,
                 "Code article Frns": derived_code,
                 "Description": p.designation,
                 "Article générique associé": defaults.get("article_generique", ""),
-                "Gen. Prod. Posting Group": defaults.get("gen_prod_posting_group", ""),
-                "Job Cost Code": defaults.get("job_cost_code", ""),
-                "Tree Code": defaults.get("tree_code", ""),
-                "Purchase Type": defaults.get("purchase_type", ""),
-                "Master Code": defaults.get("master_code", ""),
-                "Item Category Code": defaults.get("item_category_code", ""),
-                "Product Group Code": defaults.get("product_group_code", ""),
-                "Item Purchase Type": defaults.get("item_purchase_type", "Catalogue"),
                 "Unité": defaults.get("unit_of_measure", "U"),
-                "Code TVA": defaults.get("code_tva", "TVA20"),
                 "Starting Date": validity_start,
                 "Minimum Quantity": defaults.get("minimum_quantity", 1),
                 "Direct Unit Cost": float(price.amount) if price else None,
@@ -142,88 +132,101 @@ def _build_rows(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Flatten : produit simple ou matrice (variante × palier)
+# Génération des codes article
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_codes_with_prices(
     product: ProductPivot,
     price_field: str,
+    code_template: str | None,
 ) -> list[tuple[str, PricePivot | None]]:
-    # Produit simple (table mode)
-    if not product.variants:
-        price = _find_price(product.prices, price_field)
-        return [(product.supplier_product_code, price)]
+    """Retourne (code_article, prix) pour chaque ligne Gery.
 
-    # Produit matrice (matrix mode) : une ligne par variante × palier
-    result: list[tuple[str, PricePivot | None]] = []
-    for t_idx, price in enumerate(
-        p for v in product.variants for p in v.prices
-        if not price_field or p.price_type == price_field
-    ):
-        variant = next(
-            v for v in product.variants if price in v.prices
-        )
-        code = f"{product.supplier_product_code}-{variant.variant_code}-T{t_idx + 1}"
-        result.append((code, price))
-
-    if not result:
-        for v_idx, variant in enumerate(product.variants):
-            for t_idx, price in enumerate(variant.prices):
-                code = f"{product.supplier_product_code}-{variant.variant_code}-T{t_idx + 1}"
+    - Produit matriciel : 1 ligne par variante × palier
+    - Produit à paliers sans variante : 1 ligne par palier
+    - Produit simple (table mode) : 1 ligne
+    Le code est rendu via le template YAML ; si absent, fallback sur supplier_product_code.
+    """
+    if product.variants:
+        result = []
+        for variant in product.variants:
+            for price in variant.prices:
+                if price_field and price.price_type != price_field:
+                    continue
+                code = _render_code(product, price, variant.variant_code, code_template)
                 result.append((code, price))
+        return result or [(product.supplier_product_code, None)]
 
-    return result or [(product.supplier_product_code, None)]
+    prices = [p for p in product.prices if not price_field or p.price_type == price_field]
+    if not prices:
+        prices = product.prices
+
+    if prices:
+        return [(_render_code(product, p, None, code_template), p) for p in prices]
+
+    return [(product.supplier_product_code, None)]
 
 
-def _find_price(prices: list[PricePivot], price_type: str) -> PricePivot | None:
-    for p in prices:
-        if p.price_type == price_type:
-            return p
-    return prices[0] if prices else None
+def _render_code(
+    product: ProductPivot,
+    price: PricePivot | None,
+    variant_code: str | None,
+    template: str | None,
+) -> str:
+    """Rend le code article depuis le template YAML.
+
+    Le template est découpé par `|`. Chaque segment est omis si une de ses
+    variables `{field}` est absente ou vide. Cela rend le template flexible :
+    un même template fonctionne pour des produits avec ou sans variante/palier/attributs.
+
+    Exemples :
+      template = "{designation} | ep{epaisseur} | R{r_value} | {variant_code} | {tier_label}"
+      isometal EP50 ALU → "isometal lambda 0,04 | ep50 | R1.25 | ALU | 0-500m²"
+      ISOVAP (pas d'ep/R/variante) → "ISOVAP | 0-720 m²"
+      Atlantic (template="{supplier_product_code}") → "341073"
+    """
+    if not template:
+        return product.supplier_product_code
+
+    attrs = {a.key: a.value for a in product.attributes}
+    tier_label = _format_tier_label(price) if price else ""
+
+    variables: dict[str, str | None] = {
+        "supplier_product_code": product.supplier_product_code,
+        "designation": product.designation,
+        "family": product.family,
+        "subfamily": product.subfamily,
+        "variant_code": variant_code,
+        "tier_label": tier_label or None,
+        **attrs,
+    }
+
+    rendered_segments = []
+    for segment in template.split("|"):
+        segment = segment.strip()
+        field_names = _FIELD_RE.findall(segment)
+        values = {f: variables.get(f) for f in field_names}
+        if any(v is None or v == "" for v in values.values()):
+            continue
+        rendered = _FIELD_RE.sub(lambda m: str(variables[m.group(1)]), segment)
+        if rendered:
+            rendered_segments.append(rendered)
+
+    return " | ".join(rendered_segments) or product.supplier_product_code
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Template Gery : métadonnées figées en tête de fichier
-# ─────────────────────────────────────────────────────────────────────────────
-
-_MANDATORY = {
-    "Code Fournisseur SAGE", "Code article Frns", "Description",
-    "Article générique associé", "Item Purchase Type", "Unité", "Code TVA", "Minimum Quantity",
-}
-
-_RULES: dict[str, str] = {
-    "Code Fournisseur SAGE": "Absent des fichiers fournisseur > Récupération du code Frns Gery à l'import",
-    "Article générique associé": "Permet d'hériter des valeurs communes. Traitement à l'import dans GERY",
-    "Gen. Prod. Posting Group": "Heritage de l'article générique",
-    "Item Purchase Type": 'Constante = "Catalogue". Donc géré à l\'import',
-    "Starting Date": "Date du jour de l'import si pas de date",
-    "Minimum Quantity": "Valeur par défaut de 1 si vide",
-}
-
-_EXAMPLES = [
-    {
-        "Code Fournisseur SAGE": "06180040", "Code article Frns": "05808",
-        "Description": "TUBE PVC NF ME D250 4M", "Article générique associé": "1150",
-        "Gen. Prod. Posting Group": "A601100", "Job Cost Code": "A601100", "Tree Code": "A601100",
-        "Purchase Type": "Direct", "Master Code": "MAT VRD", "Item Category Code": "VOIRIE",
-        "Product Group Code": "BORDURES E", "Item Purchase Type": "Catalogue",
-        "Unité": "M", "Code TVA": "TVA20", "Starting Date": "1/3/2025",
-        "Minimum Quantity": 1, "Direct Unit Cost": "16,44 €", "Ending Date": "1/3/2026",
-    },
-    {
-        "Code Fournisseur SAGE": "06180040", "Code article Frns": "05701",
-        "Description": "TUBE PVC NF ME D 40 4M",
-        "Article générique associé": "1150 [VOIRIE ET RESEAUX DIVERS]",
-        "Gen. Prod. Posting Group": "A601100", "Job Cost Code": "A601100", "Tree Code": "A601100",
-        "Purchase Type": "Direct", "Master Code": "MAT VRD", "Item Category Code": "VOIRIE",
-        "Product Group Code": "BORDURES E", "Item Purchase Type": "Catalogue",
-        "Unité": "M", "Code TVA": "TVA20", "Starting Date": "1/3/2025",
-        "Minimum Quantity": 1, "Direct Unit Cost": "1,20 €", "Ending Date": "1/3/2026",
-    },
-]
-
-# Ligne à partir de laquelle les données réelles commencent
-_DATA_START_ROW = 12
+def _format_tier_label(price: PricePivot) -> str:
+    if price.tier_label:
+        return price.tier_label.strip()
+    if price.tier_min_quantity is None and price.tier_max_quantity is None:
+        return ""
+    unit = price.tier_unit or ""
+    if price.tier_max_quantity is None:
+        min_v = int(price.tier_min_quantity) if price.tier_min_quantity == int(price.tier_min_quantity) else price.tier_min_quantity
+        return f">{min_v}{unit}"
+    min_v = int(price.tier_min_quantity) if price.tier_min_quantity == int(price.tier_min_quantity) else price.tier_min_quantity
+    max_v = int(price.tier_max_quantity) if price.tier_max_quantity == int(price.tier_max_quantity) else price.tier_max_quantity
+    return f"{min_v}-{max_v}{unit}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -232,7 +235,6 @@ _DATA_START_ROW = 12
 
 _HEADER_FILL = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
-_LABEL_FONT = Font(bold=True)
 
 
 def _write_excel(path: Path, sheet_name: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
@@ -240,13 +242,11 @@ def _write_excel(path: Path, sheet_name: str, columns: list[str], rows: list[dic
     ws = wb.active
     ws.title = sheet_name
 
-    # Ligne 1 : en-têtes
     for col_idx, col_name in enumerate(columns, start=1):
         cell = ws.cell(row=1, column=col_idx, value=col_name)
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
 
-    # Ligne 2+ : données
     for row_idx, row_data in enumerate(rows, start=2):
         for col_idx, col_name in enumerate(columns, start=1):
             ws.cell(row=row_idx, column=col_idx, value=row_data.get(col_name))

@@ -14,6 +14,7 @@ class PricePivot(BaseModel):
     price_type: str
     amount: Decimal
     currency: str = "EUR"
+    tier_label: str | None = None
     tier_min_quantity: Decimal | None = None
     tier_max_quantity: Decimal | None = None
     tier_unit: str | None = None

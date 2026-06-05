@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.api.schemas import (
     DeltaSummary,
@@ -14,12 +14,20 @@ from middleware.api.schemas import (
     ProcessFileResponse,
 )
 from middleware.core.logging import get_logger
+from middleware.db.session import get_session
+from middleware.db.writer import (
+    get_known_hashes,
+    get_or_create_supplier,
+    get_or_create_supplier_file,
+    mark_file_processed,
+    persist_delta,
+)
 from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import generate_gery_exports
 from middleware.parser.grammar import MappingRule
 from middleware.parser.matrix_extractor import parse_matrix_file
 from middleware.parser.multi_table_extractor import parse_multi_table_file
-from middleware.parser.table_extractor import compute_business_hash, parse_table_file
+from middleware.parser.table_extractor import parse_table_file
 from middleware.parser.yaml_loader import load_all_mappings
 
 logger = get_logger(__name__)
@@ -87,18 +95,11 @@ async def process_file(request: ProcessFileRequest) -> ProcessFileResponse:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/generate-gery-exports", response_model=GenerateExportsResponse, tags=["exports"])
-async def generate_gery_exports_endpoint(request: GenerateExportsRequest) -> GenerateExportsResponse:
-    """Parse un fichier et génère les 3 fichiers d'import Gery.
-
-    Tous les produits du fichier sont traités comme des CREATE (simulation
-    première ingestion). En production, la comparaison avec la base serait faite.
-
-    Args:
-        request: supplier_code, file_path, output_dir.
-
-    Returns:
-        Liste des fichiers générés avec leur hash SHA-256.
-    """
+async def generate_gery_exports_endpoint(
+    request: GenerateExportsRequest,
+    session: AsyncSession = Depends(get_session),
+) -> GenerateExportsResponse:
+    """Parse un fichier fournisseur, calcule le delta réel vs PostgreSQL, persiste en base et génère le fichier NEW_ARTICLE Gery."""
     path = Path(request.file_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
@@ -106,8 +107,22 @@ async def generate_gery_exports_endpoint(request: GenerateExportsRequest) -> Gen
     rule = _load_rule(request.supplier_code)
     result = _parse_with_rule(path, rule)
 
-    delta = compute_delta(result.products, known_hashes={})
+    # Supplier + fichier (idempotent via content_hash)
+    supplier = await get_or_create_supplier(session, request.supplier_code)
+    supplier_file = await get_or_create_supplier_file(session, supplier, path)
 
+    # Delta réel depuis l'état PostgreSQL
+    incoming_codes = {p.supplier_product_code for p in result.products}
+    known_hashes, deleted_codes = await get_known_hashes(
+        session, supplier.id, rule.upload_mode, incoming_codes
+    )
+    delta = compute_delta(result.products, known_hashes=known_hashes, deleted_codes=deleted_codes)
+
+    # Persistance
+    await persist_delta(session, delta, supplier.id, supplier_file.id)
+    await mark_file_processed(session, supplier_file)
+
+    # Export Gery (seulement NEW_ARTICLE)
     output_dir = Path(request.output_dir)
     export_result = generate_gery_exports(
         delta=delta,
@@ -116,6 +131,19 @@ async def generate_gery_exports_endpoint(request: GenerateExportsRequest) -> Gen
         output_dir=output_dir,
         validity_start=result.file_metadata.validity_start,
         validity_end=result.file_metadata.validity_end,
+    )
+
+    logger.info(
+        "generate-gery-exports terminé",
+        supplier_code=request.supplier_code,
+        fichier=path.name,
+        produits=len(result.products),
+        creates=len(delta.creates),
+        updates=len(delta.updates),
+        price_changes=len(delta.price_changes),
+        deletes=len(delta.deletes),
+        reactivates=len(delta.reactivates),
+        unchanged=delta.unchanged,
     )
 
     return GenerateExportsResponse(

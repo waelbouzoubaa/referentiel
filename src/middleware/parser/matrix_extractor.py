@@ -37,20 +37,6 @@ logger = get_logger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def parse_matrix_file(path: Path, rule: MappingRule) -> ParsingResult:
-    """Parse un fichier Excel en mode `matrix` selon la règle YAML fournie.
-
-    Utilisé pour Airisol : matrice de prix paliers × variantes (ALU/BLANC).
-
-    Args:
-        path: Chemin vers le fichier .xlsx.
-        rule: Règle de mapping validée (extraction_mode=matrix).
-
-    Returns:
-        ParsingResult avec la liste des ProductPivot et les erreurs par ligne.
-
-    Raises:
-        ParsingError: Si le fichier est illisible ou la feuille introuvable.
-    """
     assert rule.extraction_mode == "matrix", "parse_matrix_file requiert extraction_mode=matrix"
 
     sheets = read_workbook(path, sheet_name=_sheet_name_or_none(rule.sheet_match))
@@ -65,8 +51,12 @@ def parse_matrix_file(path: Path, rule: MappingRule) -> ParsingResult:
 
     config = rule.as_matrix_config()
     file_metadata = _extract_file_metadata(sheet, rule.file_metadata)
-
     row_start, row_end = _parse_row_range(config.data_zone.rows)
+
+    # Détection dynamique des blocs de paliers si activée
+    tier_block_map: dict[int, list[ColumnGroup]] = {}
+    if config.price_matrix.tier_axis.detect_per_block:
+        tier_block_map = _build_tier_block_map(sheet, row_start, row_end, config)
 
     products: list[ProductPivot] = []
     error_count = 0
@@ -80,8 +70,10 @@ def parse_matrix_file(path: Path, rule: MappingRule) -> ParsingResult:
         if not _row_passes_filter(row, config.row_filter):
             continue
 
+        active_groups = tier_block_map.get(row_number, config.column_groups) if tier_block_map else config.column_groups
+
         try:
-            product = _extract_matrix_product(row, row_number, rule.supplier_code, config)
+            product = _extract_matrix_product(row, row_number, rule.supplier_code, config, active_groups)
             products.append(product)
         except Exception as exc:
             error_count += 1
@@ -110,6 +102,85 @@ def parse_matrix_file(path: Path, rule: MappingRule) -> ParsingResult:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Détection dynamique des blocs de paliers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_tier_block_map(
+    sheet: Sheet,
+    row_start: int,
+    row_end: int,
+    config: MatrixMappingConfig,
+) -> dict[int, list[ColumnGroup]]:
+    """Pré-scanne la feuille pour détecter les changements de paliers inter-blocs.
+
+    Retourne un mapping row_number → column_groups actifs pour cette ligne.
+    Les lignes d'en-tête de palier (désignation vide + texte de palier dans les
+    colonnes de prix) mettent à jour le contexte courant pour les lignes suivantes.
+    """
+    desig_mapping = config.product_columns.get("designation")
+    if desig_mapping is None or desig_mapping.source_col is None:
+        return {}
+
+    desig_idx = col_letter_to_idx(desig_mapping.source_col)
+    first_col_indices = [col_letter_to_idx(g.columns[0]) for g in config.column_groups]
+
+    current_groups: list[ColumnGroup] = list(config.column_groups)
+    row_to_groups: dict[int, list[ColumnGroup]] = {}
+
+    for row_0 in range(row_start - 1, row_end):
+        row_number = row_0 + 1
+        if row_0 >= len(sheet):
+            break
+        row = sheet[row_0]
+
+        desig_val = row[desig_idx] if desig_idx < len(row) else None
+        desig_empty = desig_val is None or (isinstance(desig_val, str) and not str(desig_val).strip())
+
+        if desig_empty:
+            tier_labels = _try_read_tier_labels(row, first_col_indices)
+            if tier_labels and len(tier_labels) == len(config.column_groups):
+                current_groups = [
+                    ColumnGroup(
+                        columns=g.columns,
+                        tier_label=tier_labels[i],
+                        variants=g.variants,
+                    )
+                    for i, g in enumerate(config.column_groups)
+                ]
+        else:
+            row_to_groups[row_number] = current_groups
+
+    return row_to_groups
+
+
+def _try_read_tier_labels(row: Row, col_indices: list[int]) -> list[str] | None:
+    """Tente de lire des libellés de palier depuis les colonnes données.
+
+    Retourne la liste des libellés si toutes les colonnes contiennent du texte
+    ressemblant à un palier (ex. '0-500m²', '>1000m²'), None sinon.
+    """
+    labels = []
+    for idx in col_indices:
+        val = row[idx] if idx < len(row) else None
+        if val is None or not isinstance(val, str):
+            return None
+        text = val.strip()
+        if not text or not _looks_like_tier_label(text):
+            return None
+        labels.append(text)
+    return labels or None
+
+
+def _looks_like_tier_label(text: str) -> bool:
+    """Vrai si le texte ressemble à un palier de quantité : '0-500m²' ou '>1000m²'."""
+    text = text.strip()
+    return bool(
+        re.match(r"^>\s*\d", text) or
+        re.match(r"^\d+\s*[-–]\s*\d+", text)
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Extraction d'un produit
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -118,8 +189,12 @@ def _extract_matrix_product(
     row_number: int,
     supplier_code: str,
     config: MatrixMappingConfig,
+    column_groups: list[ColumnGroup] | None = None,
 ) -> ProductPivot:
     """Extrait un ProductPivot avec ses variantes/prix depuis une ligne de la matrice."""
+    if column_groups is None:
+        column_groups = config.column_groups
+
     fields: dict[str, Any] = {}
     for field_name, col_mapping in config.product_columns.items():
         value = _extract_col_value(row, col_mapping)
@@ -134,7 +209,7 @@ def _extract_matrix_product(
     attributes = [_extract_attribute(row, am) for am in config.attributes]
     attributes = [a for a in attributes if a is not None]
 
-    variants = _extract_variants(row, config.price_matrix.column_groups, config.price_matrix)
+    variants, direct_prices = _extract_variants(row, column_groups, config.price_matrix)
 
     commercial_rules = [_extract_commercial_rule(row, crm) for crm in config.commercial_rules]
     commercial_rules = [cr for cr in commercial_rules if cr is not None]
@@ -147,6 +222,7 @@ def _extract_matrix_product(
         family=fields.get("family"),
         subfamily=fields.get("subfamily"),
         variants=variants,
+        prices=direct_prices,
         attributes=attributes,
         commercial_rules=commercial_rules,
         source_row=row_number,
@@ -192,20 +268,26 @@ def _extract_variants(
     row: Row,
     column_groups: list[ColumnGroup],
     price_matrix_config: Any,
-) -> list[VariantPivot]:
-    """Construit un VariantPivot par valeur de variante unique avec ses prix par palier."""
+) -> tuple[list[VariantPivot], list[PricePivot]]:
+    """Extrait les variantes et prix d'une ligne de la matrice.
+
+    Retourne (variants, direct_prices) :
+    - Si le produit a plusieurs variantes avec des données : (variants, [])
+    - Si une seule colonne de variante est remplie sur toutes les colonnes secondaires :
+      c'est un produit sans variante → ([], prices)
+    """
     dimension = price_matrix_config.variant_axis.dimension_name
     price_type = price_matrix_config.price_type
     currency = price_matrix_config.currency
     transform = price_matrix_config.transform
 
-    # variant_name → list of PricePivot (one per tier)
     variant_prices: dict[str, list[PricePivot]] = {}
+    has_secondary_data = False
 
-    for group_idx, group in enumerate(column_groups):
+    for group in column_groups:
         tier_min, tier_max, tier_unit = _parse_tier_label(group.tier_label)
 
-        for col_letter, variant_name in zip(group.columns, group.variants):
+        for col_pos, (col_letter, variant_name) in enumerate(zip(group.columns, group.variants)):
             idx = col_letter_to_idx(col_letter)
             raw = row[idx] if idx < len(row) else None
             if raw is None or (isinstance(raw, str) and not raw.strip()):
@@ -218,6 +300,7 @@ def _extract_variants(
                     price_type=price_type,
                     amount=Decimal(str(amount)),
                     currency=currency,
+                    tier_label=group.tier_label,
                     tier_min_quantity=tier_min,
                     tier_max_quantity=tier_max,
                     tier_unit=tier_unit,
@@ -225,20 +308,31 @@ def _extract_variants(
                 if variant_name not in variant_prices:
                     variant_prices[variant_name] = []
                 variant_prices[variant_name].append(price)
+                if col_pos > 0:
+                    has_secondary_data = True
             except Exception:
                 continue
 
+    active_variants = [k for k, v in variant_prices.items() if v]
+
+    # Produit sans variante réelle : une seule variante nommée, aucune colonne secondaire remplie
+    multi_variant_defined = any(len(g.variants) > 1 for g in column_groups)
+    if len(active_variants) == 1 and not has_secondary_data and multi_variant_defined:
+        return [], variant_prices[active_variants[0]]
+
+    # Produit matriciel : une VariantPivot par variante
     variants: list[VariantPivot] = []
     for order, (variant_name, prices) in enumerate(variant_prices.items()):
-        variants.append(VariantPivot(
-            variant_dimension=dimension,
-            variant_value=variant_name,
-            variant_code=variant_name.upper(),
-            display_order=order,
-            prices=prices,
-        ))
+        if prices:
+            variants.append(VariantPivot(
+                variant_dimension=dimension,
+                variant_value=variant_name,
+                variant_code=variant_name.upper(),
+                display_order=order,
+                prices=prices,
+            ))
 
-    return variants
+    return variants, []
 
 
 def _parse_tier_label(label: str) -> tuple[Decimal | None, Decimal | None, str | None]:
@@ -248,13 +342,11 @@ def _parse_tier_label(label: str) -> tuple[Decimal | None, Decimal | None, str |
     """
     label = label.strip()
 
-    # ">1000m²" ou ">1000"
     m = re.match(r">(\d+(?:[.,]\d+)?)\s*(\S*)", label)
     if m:
         unit = m.group(2) or None
         return Decimal(m.group(1).replace(",", ".")), None, unit
 
-    # "0-500m²" ou "500-1000 m²"
     m = re.match(r"(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)\s*(\S*)", label)
     if m:
         unit = m.group(3) or None

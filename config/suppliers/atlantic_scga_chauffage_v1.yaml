@@ -64,6 +64,7 @@ file_metadata:
 gery_export:
   enabled: true
   flatten_strategy: "cartesian"
+  derived_code_template: "{supplier_product_code}"
   defaults:
     item_purchase_type: "Catalogue"
     minimum_quantity: 1
