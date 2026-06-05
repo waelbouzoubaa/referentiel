@@ -197,6 +197,8 @@ def _extract_matrix_product(
 
     fields: dict[str, Any] = {}
     for field_name, col_mapping in config.product_columns.items():
+        if col_mapping.derived_from and "{" in col_mapping.derived_from:
+            continue  # résolu après les attributs
         value = _extract_col_value(row, col_mapping)
         if value is None and col_mapping.required:
             raise ParsingError(
@@ -208,6 +210,22 @@ def _extract_matrix_product(
 
     attributes = [_extract_attribute(row, am) for am in config.attributes]
     attributes = [a for a in attributes if a is not None]
+
+    # Résolution des champs dérivés (template avec {variable}) après attributs
+    attr_dict = {a.key: _format_attr_value(a.value) for a in attributes}
+    for field_name, col_mapping in config.product_columns.items():
+        if col_mapping.derived_from and "{" in col_mapping.derived_from:
+            template_vars = {k: str(v) for k, v in fields.items() if v is not None}
+            template_vars.update(attr_dict)
+            rendered = re.sub(r"\{(\w+)\}", lambda m: template_vars.get(m.group(1), ""), col_mapping.derived_from)
+            rendered = rendered.strip()
+            if not rendered and col_mapping.required:
+                raise ParsingError(
+                    f"Champ dérivé obligatoire '{field_name}' vide à la ligne {row_number}.",
+                    row_number=row_number,
+                )
+            if rendered:
+                fields[field_name] = rendered
 
     variants, direct_prices = _extract_variants(row, column_groups, config.price_matrix)
 
@@ -227,6 +245,17 @@ def _extract_matrix_product(
         commercial_rules=commercial_rules,
         source_row=row_number,
     )
+
+
+def _format_attr_value(value: str) -> str:
+    """Formate une valeur d'attribut : '50.0' → '50', '1.25' reste '1.25'."""
+    try:
+        f = float(value)
+        if f == int(f):
+            return str(int(f))
+    except (ValueError, TypeError):
+        pass
+    return value
 
 
 def _extract_col_value(row: Row, mapping: ColumnMapping) -> Any:

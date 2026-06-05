@@ -32,8 +32,7 @@ product_columns:
     transform: "strip"
     required: true
   supplier_product_code:
-    source_col: "C"
-    transform: "strip"
+    derived_from: "{designation} EP{epaisseur}"
     required: true
 
 attributes:
