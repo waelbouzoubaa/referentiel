@@ -20,14 +20,15 @@ def upgrade() -> None:
     op.add_column("prices", sa.Column("tier_label", sa.String(), nullable=True))
 
     # Index unique de contexte tarifaire (idempotence sur ré-ingestion)
+    # Valeurs sentinelles à la place de ::TEXT (évite l'erreur IMMUTABLE)
     op.execute("""
         CREATE UNIQUE INDEX uq_prices_context ON prices (
             product_id,
-            COALESCE(variant_id::TEXT, ''),
+            COALESCE(variant_id, '00000000-0000-0000-0000-000000000000'::uuid),
             price_type,
-            COALESCE(tier_min_quantity::TEXT, ''),
-            COALESCE(tier_max_quantity::TEXT, ''),
-            COALESCE(valid_from::TEXT, '')
+            COALESCE(tier_min_quantity, -1),
+            COALESCE(tier_max_quantity, -1),
+            COALESCE(valid_from, '1900-01-01'::date)
         )
     """)
 
