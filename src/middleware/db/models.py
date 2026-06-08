@@ -247,6 +247,7 @@ class Price(Base):
     price_type: Mapped[str] = mapped_column(String, nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    tier_label: Mapped[str | None] = mapped_column(String)
     tier_min_quantity: Mapped[float | None] = mapped_column(Numeric(15, 4))
     tier_max_quantity: Mapped[float | None] = mapped_column(Numeric(15, 4))
     tier_unit: Mapped[str | None] = mapped_column(String)

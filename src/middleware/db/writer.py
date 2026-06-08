@@ -5,11 +5,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.core.logging import get_logger
 from middleware.db.models import (
+    GeryExport,
+    GeryExportLine,
     Price,
     Product,
     ProductAttribute,
@@ -19,6 +21,7 @@ from middleware.db.models import (
     SupplierFile,
 )
 from middleware.delta.engine import DeltaResult, ProductDelta
+from middleware.exporter.gery import GeryExportResult
 from middleware.parser.pivot import PricePivot, ProductPivot
 
 logger = get_logger(__name__)
@@ -316,6 +319,7 @@ def _make_price(
         price_type=price.price_type,
         amount=price.amount,
         currency=price.currency,
+        tier_label=price.tier_label,
         tier_min_quantity=price.tier_min_quantity,
         tier_max_quantity=price.tier_max_quantity,
         tier_unit=price.tier_unit,
@@ -338,6 +342,71 @@ async def _insert_attributes(
             data_type=attr.data_type,
             unit=attr.unit,
         ))
+
+
+async def persist_gery_export(
+    session: AsyncSession,
+    export_result: GeryExportResult,
+    supplier_id: uuid.UUID,
+    file_id: uuid.UUID,
+) -> None:
+    """Persiste les exports Gery en base : GeryExport + GeryExportLine + marque product_history."""
+    if not export_result.files:
+        return
+
+    # Récupère les IDs produits par supplier_product_code (1 seule requête)
+    all_spc = {rd.supplier_product_code for f in export_result.files for rd in f.row_details}
+    if all_spc:
+        rows = (await session.execute(
+            select(Product.id, Product.supplier_product_code)
+            .where(Product.supplier_id == supplier_id, Product.supplier_product_code.in_(all_spc))
+        )).all()
+        product_id_map: dict[str, uuid.UUID] = {row[1]: row[0] for row in rows}
+    else:
+        product_id_map = {}
+
+    for gen_file in export_result.files:
+        if gen_file.line_count == 0:
+            continue
+
+        gery_export = GeryExport(
+            export_kind=gen_file.kind,
+            output_path=str(gen_file.path),
+            output_hash=gen_file.output_hash,
+            line_count=gen_file.line_count,
+            status="generated",
+        )
+        session.add(gery_export)
+        await session.flush()
+
+        for line_number, detail in enumerate(gen_file.row_details, start=1):
+            product_id = product_id_map.get(detail.supplier_product_code)
+            if product_id is None:
+                continue
+            session.add(GeryExportLine(
+                export_id=gery_export.id,
+                product_id=product_id,
+                derived_code=detail.derived_code,
+                payload=detail.payload,
+                line_number=line_number,
+            ))
+
+        # Marque les lignes d'historique CREATE/REACTIVATE de ce fichier comme exportées
+        await session.execute(
+            update(ProductHistory)
+            .where(
+                ProductHistory.source_file_id == file_id,
+                ProductHistory.exported_at.is_(None),
+                ProductHistory.change_type.in_(["CREATE", "REACTIVATE"]),
+            )
+            .values(exported_at=datetime.utcnow(), exported_in_id=gery_export.id)
+        )
+
+    logger.info(
+        "exports Gery persistés en base",
+        fichiers=len([f for f in export_result.files if f.line_count > 0]),
+        lignes=sum(f.line_count for f in export_result.files),
+    )
 
 
 def _file_hash(path: Path) -> str:

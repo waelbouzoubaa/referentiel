@@ -21,6 +21,7 @@ from middleware.db.writer import (
     get_or_create_supplier_file,
     mark_file_processed,
     persist_delta,
+    persist_gery_export,
 )
 from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import generate_gery_exports
@@ -118,9 +119,8 @@ async def generate_gery_exports_endpoint(
     )
     delta = compute_delta(result.products, known_hashes=known_hashes, deleted_codes=deleted_codes)
 
-    # Persistance
+    # Persistance delta
     await persist_delta(session, delta, supplier.id, supplier_file.id)
-    await mark_file_processed(session, supplier_file)
 
     # Export Gery (seulement NEW_ARTICLE)
     output_dir = Path(request.output_dir)
@@ -132,6 +132,10 @@ async def generate_gery_exports_endpoint(
         validity_start=result.file_metadata.validity_start,
         validity_end=result.file_metadata.validity_end,
     )
+
+    # Persistance export Gery en base + marque product_history
+    await persist_gery_export(session, export_result, supplier.id, supplier_file.id)
+    await mark_file_processed(session, supplier_file)
 
     logger.info(
         "generate-gery-exports terminé",

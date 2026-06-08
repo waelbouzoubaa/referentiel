@@ -24,11 +24,19 @@ _FIELD_RE = re.compile(r"\{(\w+)\}")
 # ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
+class RowDetail:
+    supplier_product_code: str
+    derived_code: str
+    payload: dict
+
+
+@dataclass
 class GeneratedFile:
     kind: str
     path: Path
     line_count: int
     output_hash: str
+    row_details: list[RowDetail] = field(default_factory=list)
 
 
 @dataclass
@@ -76,7 +84,7 @@ def generate_gery_exports(
     price_field = export_config.price_export_mapping.direct_unit_cost
     code_template = export_config.derived_code_template
 
-    rows = _build_rows(
+    rows, row_details = _build_rows(
         delta.creates + delta.reactivates,
         defaults,
         price_field,
@@ -93,6 +101,7 @@ def generate_gery_exports(
             path=path,
             line_count=len(rows),
             output_hash=_file_hash(path),
+            row_details=row_details,
         ))
 
     logger.info("export Gery généré", supplier_code=supplier_code, lignes=len(rows))
@@ -110,25 +119,32 @@ def _build_rows(
     code_template: str | None,
     validity_start: date | None,
     validity_end: date | None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[RowDetail]]:
     rows: list[dict[str, Any]] = []
+    details: list[RowDetail] = []
     for delta in deltas:
         if delta.new_product is None:
             continue
         p = delta.new_product
         for derived_code, price in _get_codes_with_prices(p, price_field, code_template):
-            rows.append({
+            row = {
                 "Code Fournisseur SAGE": None,
                 "Code article Frns": derived_code,
                 "Description": p.designation,
                 "Article générique associé": defaults.get("article_generique", ""),
                 "Unité": defaults.get("unit_of_measure", "U"),
-                "Starting Date": validity_start,
+                "Starting Date": validity_start.isoformat() if validity_start else None,
                 "Minimum Quantity": defaults.get("minimum_quantity", 1),
                 "Direct Unit Cost": float(price.amount) if price else None,
-                "Ending Date": validity_end,
-            })
-    return rows
+                "Ending Date": validity_end.isoformat() if validity_end else None,
+            }
+            rows.append(row)
+            details.append(RowDetail(
+                supplier_product_code=p.supplier_product_code,
+                derived_code=derived_code,
+                payload=row,
+            ))
+    return rows, details
 
 
 # ─────────────────────────────────────────────────────────────────────────────
