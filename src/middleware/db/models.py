@@ -155,6 +155,7 @@ class Product(Base):
         ForeignKey("supplier_files.id", ondelete="SET NULL")
     )
     business_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    business_hash_no_prices: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

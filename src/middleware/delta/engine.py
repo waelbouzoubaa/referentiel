@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any
 
 from middleware.parser.pivot import ProductPivot
-from middleware.parser.table_extractor import compute_business_hash
+from middleware.parser.table_extractor import compute_business_hash, compute_business_hash_no_prices
 
 
 class ChangeType(str, Enum):
@@ -57,6 +57,7 @@ class DeltaResult:
 def compute_delta(
     new_products: list[ProductPivot],
     known_hashes: dict[str, str],
+    known_hashes_no_prices: dict[str, str] | None = None,
     deleted_codes: set[str] | None = None,
 ) -> DeltaResult:
     """Compare un snapshot entrant avec l'état connu en base.
@@ -65,12 +66,16 @@ def compute_delta(
         new_products: Produits issus du parsing du nouveau fichier.
         known_hashes: Dict supplier_product_code → business_hash actuel en base.
                       Les codes avec status='inactive'/'deleted' doivent aussi être inclus.
+        known_hashes_no_prices: Dict supplier_product_code → business_hash_no_prices
+                      actuel en base. Permet de distinguer PRICE_CHANGE (seuls les prix
+                      diffèrent) d'UPDATE (un champ métier comme la désignation a changé).
         deleted_codes: Codes actuellement marqués comme supprimés/inactifs en base.
                        Un code qui réapparaît dans new_products génère REACTIVATE.
 
     Returns:
         DeltaResult avec les listes de changements par type.
     """
+    known_hashes_no_prices = known_hashes_no_prices or {}
     deleted_codes = deleted_codes or set()
     result = DeltaResult()
 
@@ -104,7 +109,9 @@ def compute_delta(
             result.unchanged += 1
         else:
             # Hash différent → déterminer si c'est PRICE_CHANGE ou UPDATE
-            change_type, field_changes = _classify_change(product, known_hashes[code], new_hash)
+            change_type, field_changes = _classify_change(
+                product, known_hashes_no_prices.get(code), new_hash
+            )
             delta = ProductDelta(
                 change_type=change_type,
                 supplier_product_code=code,
@@ -134,60 +141,38 @@ def compute_delta(
 
 def _classify_change(
     product: ProductPivot,
-    old_hash: str,
+    old_hash_no_prices: str | None,
     new_hash: str,
 ) -> tuple[ChangeType, dict[str, Any]]:
     """Détermine si le changement est PRICE_CHANGE ou UPDATE (champ métier).
 
-    Un PRICE_CHANGE est déclenché quand seuls les prix ont changé.
-    Un UPDATE est déclenché quand au moins un champ non-prix a changé.
+    Compare le hash sans prix stocké en base à celui du produit entrant :
+    - identiques → seuls les prix ont changé → PRICE_CHANGE
+    - différents (ou absence de référence pour un produit créé avant cette
+      colonne) → un champ métier a changé → UPDATE
 
     Returns:
         (ChangeType, dict des champs modifiés pour le journal d'historique)
     """
-    field_changes: dict[str, Any] = {}
+    new_hash_no_prices = compute_business_hash_no_prices(product)
 
-    # On reconstruit le hash sans les prix pour voir si c'est uniquement les prix
-    hash_no_prices = _hash_without_prices(product)
+    if old_hash_no_prices is not None and old_hash_no_prices == new_hash_no_prices:
+        change_type = ChangeType.PRICE_CHANGE
+    else:
+        change_type = ChangeType.UPDATE
 
-    # On compare avec un hash de référence sans prix.
-    # S'ils diffèrent → UPDATE (champ métier changé)
-    # S'ils sont identiques → PRICE_CHANGE (seuls les prix ont changé)
-    #
-    # NOTE: old_hash est le hash AVEC les prix. On ne peut pas recalculer
-    # le "ancien hash sans prix" ici. On utilise donc une heuristique :
-    # si la désignation/famille/attributs non-prix ont le même hash → PRICE_CHANGE.
-    # En pratique on marque PRICE_CHANGE sauf si on a des infos complémentaires.
-    # Pour une détection fine, la comparaison réelle se fait en base (cf. service layer).
-
-    # Heuristique simple : on indique les prix comme changés
-    field_changes["prices"] = {
-        "old_hash": old_hash,
-        "new_hash": new_hash,
-        "new_prices": [
-            {"type": p.price_type, "amount": str(p.amount)}
-            for p in product.all_prices()
-        ],
-    }
-
-    return ChangeType.PRICE_CHANGE, field_changes
-
-
-def _hash_without_prices(product: ProductPivot) -> str:
-    """Hash du produit en excluant les prix — pour classifier les changements."""
-    import hashlib
-    import json
-
-    canonical = json.dumps(
-        {
-            "designation": product.designation.strip().upper(),
-            "family": (product.family or "").strip().upper(),
-            "subfamily": (product.subfamily or "").strip().upper(),
-            "attributes": sorted(
-                [(a.key, a.value, a.unit or "") for a in product.attributes]
-            ),
+    field_changes: dict[str, Any] = {
+        "business_hash_no_prices": {
+            "old": old_hash_no_prices,
+            "new": new_hash_no_prices,
         },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    }
+    if change_type == ChangeType.PRICE_CHANGE:
+        field_changes["prices"] = {
+            "new_prices": [
+                {"type": p.price_type, "amount": str(p.amount)}
+                for p in product.all_prices()
+            ],
+        }
+
+    return change_type, field_changes

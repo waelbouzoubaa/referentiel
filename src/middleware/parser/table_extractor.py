@@ -330,6 +330,28 @@ def compute_business_hash(product: ProductPivot) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def compute_business_hash_no_prices(product: ProductPivot) -> str:
+    """Calcule le SHA-256 du tuple métier canonique d'un produit, sans les prix.
+
+    Permet de distinguer un PRICE_CHANGE (seuls les prix diffèrent) d'un UPDATE
+    (un champ métier comme la désignation a changé) en comparant ce hash à celui
+    stocké en base lors de la dernière ingestion.
+    """
+    canonical = json.dumps(
+        {
+            "designation": product.designation.strip().upper(),
+            "family": (product.family or "").strip().upper(),
+            "subfamily": (product.subfamily or "").strip().upper(),
+            "attributes": sorted(
+                [(a.key, a.value, a.unit or "") for a in product.attributes]
+            ),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Utilitaires
 # ─────────────────────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ from middleware.db.models import (
 from middleware.delta.engine import DeltaResult, ProductDelta
 from middleware.exporter.gery import GeryExportResult
 from middleware.parser.pivot import PricePivot, ProductPivot
+from middleware.parser.table_extractor import compute_business_hash_no_prices
 
 logger = get_logger(__name__)
 
@@ -108,8 +109,8 @@ async def get_known_hashes(
     supplier_id: uuid.UUID,
     upload_mode: str,
     incoming_codes: set[str] | None = None,
-) -> tuple[dict[str, str], set[str]]:
-    """Retourne (known_hashes, deleted_codes) pour alimenter compute_delta.
+) -> tuple[dict[str, str], dict[str, str], set[str]]:
+    """Retourne (known_hashes, known_hashes_no_prices, deleted_codes) pour compute_delta.
 
     - full : tous les produits du fournisseur sont chargés — les absents du nouveau
       fichier génèrent des DELETEs.
@@ -119,6 +120,7 @@ async def get_known_hashes(
     query = select(
         Product.supplier_product_code,
         Product.business_hash,
+        Product.business_hash_no_prices,
         Product.status,
     ).where(Product.supplier_id == supplier_id)
 
@@ -128,9 +130,10 @@ async def get_known_hashes(
     rows = (await session.execute(query)).all()
 
     known_hashes = {row[0]: row[1] for row in rows}
-    deleted_codes = {row[0] for row in rows if row[2] in ("inactive", "deleted")}
+    known_hashes_no_prices = {row[0]: row[2] for row in rows}
+    deleted_codes = {row[0] for row in rows if row[3] in ("inactive", "deleted")}
 
-    return known_hashes, deleted_codes
+    return known_hashes, known_hashes_no_prices, deleted_codes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +199,7 @@ async def _insert_product(
         product_kind=p.product_kind,
         status="active",
         business_hash=d.new_hash or "",
+        business_hash_no_prices=compute_business_hash_no_prices(p),
         first_seen_in_file_id=file_id,
         last_seen_in_file_id=file_id,
     )
@@ -234,6 +238,7 @@ async def _upsert_product(
     db_product.family = p.family
     db_product.subfamily = p.subfamily
     db_product.business_hash = d.new_hash or ""
+    db_product.business_hash_no_prices = compute_business_hash_no_prices(p)
     db_product.status = "active"
     db_product.last_seen_in_file_id = file_id
 

@@ -114,10 +114,15 @@ async def generate_gery_exports_endpoint(
 
     # Delta réel depuis l'état PostgreSQL
     incoming_codes = {p.supplier_product_code for p in result.products}
-    known_hashes, deleted_codes = await get_known_hashes(
+    known_hashes, known_hashes_no_prices, deleted_codes = await get_known_hashes(
         session, supplier.id, rule.upload_mode, incoming_codes
     )
-    delta = compute_delta(result.products, known_hashes=known_hashes, deleted_codes=deleted_codes)
+    delta = compute_delta(
+        result.products,
+        known_hashes=known_hashes,
+        known_hashes_no_prices=known_hashes_no_prices,
+        deleted_codes=deleted_codes,
+    )
 
     # Persistance delta
     await persist_delta(session, delta, supplier.id, supplier_file.id)

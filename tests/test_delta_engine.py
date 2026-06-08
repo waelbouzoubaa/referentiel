@@ -6,7 +6,7 @@ import pytest
 
 from middleware.delta.engine import ChangeType, DeltaResult, ProductDelta, compute_delta
 from middleware.parser.pivot import AttributePivot, PricePivot, ProductPivot
-from middleware.parser.table_extractor import compute_business_hash
+from middleware.parser.table_extractor import compute_business_hash, compute_business_hash_no_prices
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -35,6 +35,10 @@ def _make_product(
 
 def _hashes(products: list[ProductPivot]) -> dict[str, str]:
     return {p.supplier_product_code: compute_business_hash(p) for p in products}
+
+
+def _hashes_no_prices(products: list[ProductPivot]) -> dict[str, str]:
+    return {p.supplier_product_code: compute_business_hash_no_prices(p) for p in products}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -85,7 +89,9 @@ def test_price_change_detected() -> None:
     old = _make_product("CODE001", installer="90")
     new = _make_product("CODE001", installer="85")  # prix installateur baisse
 
-    result = compute_delta([new], known_hashes=_hashes([old]))
+    result = compute_delta(
+        [new], known_hashes=_hashes([old]), known_hashes_no_prices=_hashes_no_prices([old])
+    )
     assert len(result.price_changes) == 1
     assert result.price_changes[0].change_type == ChangeType.PRICE_CHANGE
     assert result.price_changes[0].supplier_product_code == "CODE001"
@@ -95,7 +101,9 @@ def test_price_change_has_field_changes() -> None:
     old = _make_product("CODE001", installer="90")
     new = _make_product("CODE001", installer="85")
 
-    result = compute_delta([new], known_hashes=_hashes([old]))
+    result = compute_delta(
+        [new], known_hashes=_hashes([old]), known_hashes_no_prices=_hashes_no_prices([old])
+    )
     delta = result.price_changes[0]
     assert "prices" in delta.field_changes
 
@@ -104,11 +112,52 @@ def test_price_change_has_hashes() -> None:
     old = _make_product("CODE001", installer="90")
     new = _make_product("CODE001", installer="85")
 
-    result = compute_delta([new], known_hashes=_hashes([old]))
+    result = compute_delta(
+        [new], known_hashes=_hashes([old]), known_hashes_no_prices=_hashes_no_prices([old])
+    )
     delta = result.price_changes[0]
     assert delta.previous_hash is not None
     assert delta.new_hash is not None
     assert delta.previous_hash != delta.new_hash
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — UPDATE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_update_detected_on_designation_change() -> None:
+    old = _make_product("CODE001", designation="Ancien libellé")
+    new = _make_product("CODE001", designation="Nouveau libellé")  # prix inchangés
+
+    result = compute_delta(
+        [new], known_hashes=_hashes([old]), known_hashes_no_prices=_hashes_no_prices([old])
+    )
+    assert len(result.updates) == 1
+    assert len(result.price_changes) == 0
+    assert result.updates[0].change_type == ChangeType.UPDATE
+    assert result.updates[0].supplier_product_code == "CODE001"
+
+
+def test_update_takes_priority_over_price_change_when_both_change() -> None:
+    old = _make_product("CODE001", designation="Ancien libellé", installer="90")
+    new = _make_product("CODE001", designation="Nouveau libellé", installer="85")
+
+    result = compute_delta(
+        [new], known_hashes=_hashes([old]), known_hashes_no_prices=_hashes_no_prices([old])
+    )
+    assert len(result.updates) == 1
+    assert len(result.price_changes) == 0
+
+
+def test_change_classified_as_update_when_no_prior_hash_no_prices() -> None:
+    """Produit créé avant l'ajout de business_hash_no_prices (valeur absente en base) :
+    on ne peut pas savoir si seul le prix a changé → on classe prudemment en UPDATE."""
+    old = _make_product("CODE001", installer="90")
+    new = _make_product("CODE001", installer="85")
+
+    result = compute_delta([new], known_hashes=_hashes([old]), known_hashes_no_prices={})
+    assert len(result.updates) == 1
+    assert len(result.price_changes) == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +223,7 @@ def test_mixed_scenario() -> None:
         _make_product("CODE003"),       # va disparaître → DELETE
     ]
     known = _hashes(existing)
+    known_no_prices = _hashes_no_prices(existing)
 
     # Nouveau snapshot
     new_snapshot = [
@@ -183,7 +233,7 @@ def test_mixed_scenario() -> None:
         # CODE003 absent → DELETE
     ]
 
-    result = compute_delta(new_snapshot, known_hashes=known)
+    result = compute_delta(new_snapshot, known_hashes=known, known_hashes_no_prices=known_no_prices)
 
     assert result.unchanged == 1
     assert len(result.price_changes) == 1
