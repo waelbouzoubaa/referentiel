@@ -97,17 +97,6 @@ def test_price_change_detected() -> None:
     assert result.price_changes[0].supplier_product_code == "CODE001"
 
 
-def test_price_change_has_field_changes() -> None:
-    old = _make_product("CODE001", installer="90")
-    new = _make_product("CODE001", installer="85")
-
-    result = compute_delta(
-        [new], known_hashes=_hashes([old]), known_hashes_no_prices=_hashes_no_prices([old])
-    )
-    delta = result.price_changes[0]
-    assert "prices" in delta.field_changes
-
-
 def test_price_change_has_hashes() -> None:
     old = _make_product("CODE001", installer="90")
     new = _make_product("CODE001", installer="85")

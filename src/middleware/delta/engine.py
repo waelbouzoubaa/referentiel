@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from middleware.parser.pivot import ProductPivot
 from middleware.parser.table_extractor import compute_business_hash, compute_business_hash_no_prices
@@ -26,7 +25,6 @@ class ProductDelta:
     new_product: ProductPivot | None = None
     previous_hash: str | None = None
     new_hash: str | None = None
-    field_changes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -109,9 +107,7 @@ def compute_delta(
             result.unchanged += 1
         else:
             # Hash différent → déterminer si c'est PRICE_CHANGE ou UPDATE
-            change_type, field_changes = _classify_change(
-                product, known_hashes_no_prices.get(code), new_hash
-            )
+            change_type = _classify_change(product, known_hashes_no_prices.get(code))
             delta = ProductDelta(
                 change_type=change_type,
                 supplier_product_code=code,
@@ -119,7 +115,6 @@ def compute_delta(
                 new_product=product,
                 previous_hash=known_hashes[code],
                 new_hash=new_hash,
-                field_changes=field_changes,
             )
             if change_type == ChangeType.PRICE_CHANGE:
                 result.price_changes.append(delta)
@@ -142,37 +137,13 @@ def compute_delta(
 def _classify_change(
     product: ProductPivot,
     old_hash_no_prices: str | None,
-    new_hash: str,
-) -> tuple[ChangeType, dict[str, Any]]:
-    """Détermine si le changement est PRICE_CHANGE ou UPDATE (champ métier).
+) -> ChangeType:
+    """Détermine si le changement est PRICE_CHANGE ou UPDATE.
 
-    Compare le hash sans prix stocké en base à celui du produit entrant :
-    - identiques → seuls les prix ont changé → PRICE_CHANGE
-    - différents (ou absence de référence pour un produit créé avant cette
-      colonne) → un champ métier a changé → UPDATE
-
-    Returns:
-        (ChangeType, dict des champs modifiés pour le journal d'historique)
+    - hash_no_prices identique → seuls les prix ont changé → PRICE_CHANGE
+    - hash_no_prices différent ou absent → champ métier changé → UPDATE
     """
     new_hash_no_prices = compute_business_hash_no_prices(product)
-
     if old_hash_no_prices is not None and old_hash_no_prices == new_hash_no_prices:
-        change_type = ChangeType.PRICE_CHANGE
-    else:
-        change_type = ChangeType.UPDATE
-
-    field_changes: dict[str, Any] = {
-        "business_hash_no_prices": {
-            "old": old_hash_no_prices,
-            "new": new_hash_no_prices,
-        },
-    }
-    if change_type == ChangeType.PRICE_CHANGE:
-        field_changes["prices"] = {
-            "new_prices": [
-                {"type": p.price_type, "amount": str(p.amount)}
-                for p in product.all_prices()
-            ],
-        }
-
-    return change_type, field_changes
+        return ChangeType.PRICE_CHANGE
+    return ChangeType.UPDATE

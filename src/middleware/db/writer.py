@@ -15,6 +15,7 @@ from middleware.db.models import (
     Price,
     Product,
     ProductAttribute,
+    ProductAudit,
     ProductHistory,
     ProductVariant,
     Supplier,
@@ -182,6 +183,39 @@ async def persist_delta(
 # Helpers internes
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _compute_field_diff(
+    db_product: Product,
+    old_prices: list[Price],
+    old_attrs: list[ProductAttribute],
+    new_product: ProductPivot,
+) -> list[str]:
+    """Retourne la liste des noms de champs qui ont changé entre l'état DB et le produit entrant."""
+    changed: list[str] = []
+
+    # Champs fixes
+    if (db_product.designation or "").strip().upper() != (new_product.designation or "").strip().upper():
+        changed.append("designation")
+    if (db_product.family or "").strip() != (new_product.family or "").strip():
+        changed.append("family")
+    if (db_product.subfamily or "").strip() != (new_product.subfamily or "").strip():
+        changed.append("subfamily")
+
+    # Attributs dynamiques (fonctionne pour tous les fournisseurs)
+    old_attr_map = {a.attribute_key: a.attribute_value for a in old_attrs}
+    new_attr_map = {a.key: a.value for a in new_product.attributes}
+    for key in set(old_attr_map) | set(new_attr_map):
+        if old_attr_map.get(key) != new_attr_map.get(key):
+            changed.append(f"attr_{key}")
+
+    # Prix directs (sans variante) — un seul champ "price" si quoi que ce soit a changé
+    old_prices_set = {(p.price_type, str(p.amount)) for p in old_prices}
+    new_prices_set = {(p.price_type, str(p.amount)) for p in new_product.prices}
+    if old_prices_set != new_prices_set:
+        changed.append("price")
+
+    return changed
+
+
 async def _insert_product(
     session: AsyncSession,
     d: ProductDelta,
@@ -234,6 +268,16 @@ async def _upsert_product(
         return
 
     p = d.new_product
+
+    # Charger l'état actuel avant écrasement pour calculer le diff
+    old_prices = (await session.execute(
+        select(Price).where(Price.product_id == db_product.id, Price.variant_id.is_(None))
+    )).scalars().all()
+    old_attrs = (await session.execute(
+        select(ProductAttribute).where(ProductAttribute.product_id == db_product.id)
+    )).scalars().all()
+    changed_fields = _compute_field_diff(db_product, old_prices, old_attrs, p)
+
     db_product.designation = p.designation
     db_product.family = p.family
     db_product.subfamily = p.subfamily
@@ -242,7 +286,6 @@ async def _upsert_product(
     db_product.status = "active"
     db_product.last_seen_in_file_id = file_id
 
-    # Suppression des variantes (les prix en cascade via FK) et attributs
     await session.execute(
         delete(ProductVariant).where(ProductVariant.product_id == db_product.id)
     )
@@ -258,12 +301,20 @@ async def _upsert_product(
 
     await _insert_variants_and_prices(session, p, db_product.id, file_id)
     await _insert_attributes(session, p, db_product.id)
+
+    now = datetime.utcnow()
     session.add(ProductHistory(
         product_id=db_product.id,
         change_type=change_type,
-        field_changes=d.field_changes or None,
         source_file_id=file_id,
     ))
+    for field_name in changed_fields:
+        session.add(ProductAudit(
+            product_id=db_product.id,
+            field_name=field_name,
+            changed_at=now,
+            source_file_id=file_id,
+        ))
 
 
 async def _soft_delete_product(

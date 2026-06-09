@@ -108,13 +108,12 @@ import uuid as _uuid
 
 class AuditEntryOut(BaseModel):
     id: _uuid.UUID
-    detected_at: datetime
+    changed_at: datetime
     supplier_code: str
     supplier_product_code: str
     designation: str
-    change_type: str
+    field_name: str
     source_file: str
-    field_changes: dict[str, Any] | None = None
 
 
 class AuditResponse(BaseModel):

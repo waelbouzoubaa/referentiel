@@ -290,7 +290,7 @@ class CommercialRule(Base):
 # ── Historique des changements ────────────────────────────────────────────────
 
 class ProductHistory(Base):
-    """Journal des changements métier (CREATE/UPDATE/PRICE_CHANGE/DELETE/REACTIVATE)."""
+    """Journal des événements métier (CREATE/UPDATE/PRICE_CHANGE/DELETE/REACTIVATE)."""
 
     __tablename__ = "product_history"
     __table_args__ = (
@@ -305,7 +305,6 @@ class ProductHistory(Base):
         ForeignKey("products.id", ondelete="CASCADE"), nullable=False
     )
     change_type: Mapped[str] = mapped_column(String, nullable=False)
-    field_changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     source_file_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("supplier_files.id", ondelete="RESTRICT"), nullable=False
     )
@@ -316,6 +315,24 @@ class ProductHistory(Base):
     )
 
     product: Mapped[Product] = relationship(back_populates="history")
+
+
+# ── Audit champs modifiés ─────────────────────────────────────────────────────
+
+class ProductAudit(Base):
+    """Trace par champ modifié — un enregistrement par champ qui a changé."""
+
+    __tablename__ = "product_audit"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    field_name: Mapped[str] = mapped_column(String, nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    source_file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("supplier_files.id", ondelete="RESTRICT"), nullable=False
+    )
 
 
 # ── Exports Gery ──────────────────────────────────────────────────────────────
