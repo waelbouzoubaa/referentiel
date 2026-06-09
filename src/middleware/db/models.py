@@ -102,6 +102,7 @@ class SupplierFile(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     gcs_path: Mapped[str] = mapped_column(String, nullable=False)
+    minio_path: Mapped[str | None] = mapped_column(String, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processing_ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

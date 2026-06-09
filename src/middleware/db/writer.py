@@ -9,6 +9,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.core.logging import get_logger
+from middleware.storage.minio_client import upload_raw_file
 from middleware.db.models import (
     GeryExport,
     GeryExportLine,
@@ -81,6 +82,8 @@ async def get_or_create_supplier_file(
         )
         return supplier_file
 
+    minio_path = await upload_raw_file(file_path, supplier.code, content_hash)
+
     supplier_file = SupplierFile(
         supplier_id=supplier.id,
         filename=file_path.name,
@@ -88,6 +91,7 @@ async def get_or_create_supplier_file(
         content_hash=content_hash,
         size_bytes=file_path.stat().st_size,
         gcs_path=str(file_path),
+        minio_path=minio_path,
         status="processing",
         processing_started_at=datetime.utcnow(),
     )
