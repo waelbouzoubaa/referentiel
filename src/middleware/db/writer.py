@@ -207,9 +207,10 @@ def _compute_field_diff(
         if old_attr_map.get(key) != new_attr_map.get(key):
             changed.append(f"attr_{key}")
 
-    # Prix directs (sans variante) — un seul champ "price" si quoi que ce soit a changé
+    # Prix (directs + variantes) — un seul champ "price" si quoi que ce soit a changé
     old_prices_set = {(p.price_type, str(p.amount)) for p in old_prices}
     new_prices_set = {(p.price_type, str(p.amount)) for p in new_product.prices}
+    new_prices_set |= {(p.price_type, str(p.amount)) for v in new_product.variants for p in v.prices}
     if old_prices_set != new_prices_set:
         changed.append("price")
 
@@ -269,9 +270,9 @@ async def _upsert_product(
 
     p = d.new_product
 
-    # Charger l'état actuel avant écrasement pour calculer le diff
+    # Charger l'état actuel avant écrasement pour calculer le diff (directs + variantes)
     old_prices = (await session.execute(
-        select(Price).where(Price.product_id == db_product.id, Price.variant_id.is_(None))
+        select(Price).where(Price.product_id == db_product.id)
     )).scalars().all()
     old_attrs = (await session.execute(
         select(ProductAttribute).where(ProductAttribute.product_id == db_product.id)
