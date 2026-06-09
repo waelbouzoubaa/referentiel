@@ -102,6 +102,28 @@ class GenerateExportsResponse(BaseModel):
     generated_at: datetime
 
 
+# ─── Audit ────────────────────────────────────────────────────────────────────
+
+import uuid as _uuid
+
+class AuditEntryOut(BaseModel):
+    id: _uuid.UUID
+    detected_at: datetime
+    supplier_code: str
+    supplier_product_code: str
+    designation: str
+    change_type: str
+    source_file: str
+    field_changes: dict[str, Any] | None = None
+
+
+class AuditResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    entries: list[AuditEntryOut]
+
+
 # ─── Historique produit ───────────────────────────────────────────────────────
 
 class ProductHistoryEntry(BaseModel):
