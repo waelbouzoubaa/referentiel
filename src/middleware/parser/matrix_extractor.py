@@ -217,8 +217,7 @@ def _extract_matrix_product(
         if col_mapping.derived_from and "{" in col_mapping.derived_from:
             template_vars = {k: str(v) for k, v in fields.items() if v is not None}
             template_vars.update(attr_dict)
-            rendered = re.sub(r"\{(\w+)\}", lambda m: template_vars.get(m.group(1), ""), col_mapping.derived_from)
-            rendered = rendered.strip()
+            rendered = _render_derived_template(col_mapping.derived_from, template_vars)
             if not rendered and col_mapping.required:
                 raise ParsingError(
                     f"Champ dérivé obligatoire '{field_name}' vide à la ligne {row_number}.",
@@ -245,6 +244,26 @@ def _extract_matrix_product(
         commercial_rules=commercial_rules,
         source_row=row_number,
     )
+
+
+def _render_derived_template(template: str, template_vars: dict[str, str]) -> str:
+    """Rend un champ dérivé `derived_from`, segment par segment (séparés par `|`).
+
+    Un segment dont une variable `{var}` est absente/vide est omis (cf. `_render_code`
+    dans gery.py). Permet à un même template de couvrir des lignes hétérogènes,
+    ex. "{designation} | EP{epaisseur}" → "ISOLLIN EP50" si epaisseur connu,
+    "ISOVAP" si epaisseur absent.
+    """
+    segments = []
+    for segment in template.split("|"):
+        segment = segment.strip()
+        var_names = re.findall(r"\{(\w+)\}", segment)
+        if var_names and any(not template_vars.get(v) for v in var_names):
+            continue
+        rendered = re.sub(r"\{(\w+)\}", lambda m: template_vars.get(m.group(1), ""), segment)
+        if rendered:
+            segments.append(rendered)
+    return " ".join(segments)
 
 
 def _format_attr_value(value: str) -> str:

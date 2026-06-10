@@ -12,7 +12,7 @@ data_starts_row: 10
 extraction_mode: matrix
 
 row_filter:
-  must_have_value_in: ["C", "E"]
+  must_have_value_in: ["C"]
   must_have_value_in_any: ["G", "I", "K"]
 
 data_zone:
@@ -32,7 +32,7 @@ product_columns:
     transform: "strip"
     required: true
   supplier_product_code:
-    derived_from: "{designation} EP{epaisseur}"
+    derived_from: "{designation} | EP{epaisseur}"
     required: true
 
 attributes:
