@@ -16,8 +16,8 @@ tables:
   - name: "entretien_bases_vie"
     description: "Forfait mensuel d'entretien selon taille de base et fréquence"
     zone:
-      header_row: 8
-      data_rows: "9:18"
+      header_row: 7
+      data_rows: "8:17"
       cols: "A:G"
     layout: "matrix_2D"
     col_dimensions:
@@ -56,8 +56,8 @@ tables:
   - name: "fournitures_consommables"
     description: "Forfait mensuel selon nombre de personnes"
     zone:
-      header_row: 23
-      data_rows: "24:27"
+      header_row: 22
+      data_rows: "23:26"
       cols: "A:B"
     layout: "barème_1D"
     product_template:
