@@ -21,7 +21,27 @@ async def list_suppliers() -> list[SupplierOut]:
             name=rule.description or rule.supplier_code,
             active=True,
             upload_mode=rule.upload_mode,
-            sharepoint_folder=rule.supplier_code,
+            sharepoint_folder=rule.resolved_sharepoint_folders()[0],
         )
         for rule in mappings.values()
     ]
+
+
+@router.get(
+    "/folder-mapping",
+    response_model=dict[str, str],
+    summary="Mapping dossier SharePoint (minuscules) -> supplier_code",
+)
+async def folder_mapping() -> dict[str, str]:
+    """Mapping consommé par le watcher pour résoudre le fournisseur d'un fichier déposé.
+
+    Construit dynamiquement depuis `sharepoint_folder` de chaque YAML — ajouter un
+    fournisseur ne nécessite donc aucune modification du watcher.
+    """
+    config_dir = Path("config/suppliers")
+    mappings = load_all_mappings(config_dir)
+    result: dict[str, str] = {}
+    for rule in mappings.values():
+        for folder in rule.resolved_sharepoint_folders():
+            result[folder.lower()] = rule.supplier_code
+    return result

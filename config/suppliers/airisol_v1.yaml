@@ -2,6 +2,7 @@ supplier_code: "airisol"
 mapping_version: 1
 description: "Airisol — étanchéité, matrice de prix multi-paliers / multi-variantes"
 upload_mode: "full"
+sharepoint_folder: "airisol"
 
 sheet_match: "Table 1"
 header_detection:

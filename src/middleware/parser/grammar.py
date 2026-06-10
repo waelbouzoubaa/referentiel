@@ -306,6 +306,10 @@ class MappingRule(BaseModel):
     description: str = ""
     upload_mode: Literal["full", "incremental"] = "incremental"
 
+    # Nom(s) du dossier SharePoint surveillé par le watcher pour ce fournisseur.
+    # Si absent, le watcher utilise supplier_code comme nom de dossier.
+    sharepoint_folder: str | list[str] | None = None
+
     sheet_match: str | dict[str, str] = "auto"
     header_detection: HeaderDetection = Field(default_factory=lambda: HeaderDetection(mode="explicit", row=1))
     data_starts_row: int = Field(ge=1)
@@ -340,6 +344,17 @@ class MappingRule(BaseModel):
         if self.extraction_mode == "multi_table" and not self.tables:
             raise ValueError("tables est obligatoire pour extraction_mode=multi_table.")
         return self
+
+    def resolved_sharepoint_folders(self) -> list[str]:
+        """Liste des noms de dossiers SharePoint surveillés pour ce fournisseur.
+
+        Retombe sur `supplier_code` si `sharepoint_folder` n'est pas renseigné.
+        """
+        if self.sharepoint_folder is None:
+            return [self.supplier_code]
+        if isinstance(self.sharepoint_folder, str):
+            return [self.sharepoint_folder]
+        return list(self.sharepoint_folder)
 
     def as_table_config(self) -> TableMappingConfig:
         """Retourne la config table (valide uniquement si extraction_mode=table)."""

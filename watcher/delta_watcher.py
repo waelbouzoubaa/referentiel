@@ -13,15 +13,26 @@ GRAPH_URL = "https://graph.microsoft.com/v1.0"
 DELTA_TOKEN_FILE = Path("delta_token.json")
 FILE_CACHE_FILE = Path("file_cache.json")
 
-# Mapping dossier SharePoint → supplier_code middleware
-# Clé = nom du dossier dans SharePoint (insensible à la casse)
-FOLDER_TO_SUPPLIER = {
-    "atlantic":           "atlantic_scga_chauffage",
-    "atlantic chauffage": "atlantic_scga_chauffage",
-    "atlantic eau":       "atlantic_scga_eau",
-    "airisol":            "airisol",
-    "agenor":             "agenor",
-}
+# Mapping dossier SharePoint (minuscules) → supplier_code, chargé depuis le
+# middleware (cf. config/suppliers/*.yaml, champ sharepoint_folder).
+# Mis à jour à chaque cycle de polling — voir _refresh_folder_mapping().
+_folder_to_supplier: dict[str, str] = {}
+
+
+def _refresh_folder_mapping():
+    """Recharge le mapping dossier→fournisseur depuis le middleware.
+
+    En cas d'échec, conserve le dernier mapping connu (le middleware peut être
+    temporairement indisponible sans bloquer le watcher).
+    """
+    global _folder_to_supplier
+    try:
+        resp = requests.get(f"{MIDDLEWARE_API_URL}/suppliers/folder-mapping", timeout=15)
+        resp.raise_for_status()
+        _folder_to_supplier = resp.json()
+    except Exception as exc:
+        if not _folder_to_supplier:
+            print(f"  → Impossible de charger le mapping fournisseurs ({exc})")
 
 
 def load_state(drive_id):
@@ -229,7 +240,7 @@ def _resolve_supplier_code(item) -> str | None:
     else:
         folder = parent_path.strip("/").split("/")[-1]
 
-    code = FOLDER_TO_SUPPLIER.get(folder.lower())
+    code = _folder_to_supplier.get(folder.lower())
 
     # Atlantic : distingue chauffage vs eau par le nom du fichier
     if code == "atlantic_scga_chauffage":
@@ -251,6 +262,7 @@ def run():
         delta_link = f"{GRAPH_URL}/drives/{drive_id}/root/delta"
 
     while True:
+        _refresh_folder_mapping()
         print(f"\nPolling delta...")
         items, new_delta_link = fetch_delta(delta_link)
 

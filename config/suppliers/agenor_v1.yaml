@@ -2,6 +2,7 @@ supplier_code: "agenor"
 mapping_version: 1
 description: "Agenor — entretien bases vie + fournitures consommables (prestations)"
 upload_mode: "full"
+sharepoint_folder: "agenor"
 
 sheet_match: "Agenor 2026"
 header_detection:

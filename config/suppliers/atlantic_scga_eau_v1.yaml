@@ -2,6 +2,7 @@ supplier_code: "atlantic_scga_eau"
 mapping_version: 1
 description: "Atlantic SCGA — gamme eau chaude sanitaire"
 upload_mode: "full"
+sharepoint_folder: "atlantic eau"
 
 sheet_match: "Atlantic 2026"
 header_detection:
