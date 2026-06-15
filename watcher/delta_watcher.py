@@ -149,6 +149,8 @@ def _trigger_middleware(item):
                 "supplier_code": supplier_code,
                 "file_path": str(tmp_path),
                 "output_dir": "/app/exports",
+                "original_filename": name,
+                "sharepoint_item_id": item.get("id"),
             },
             timeout=120,
         )

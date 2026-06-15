@@ -87,6 +87,8 @@ class GenerateExportsRequest(BaseModel):
     supplier_code: str
     file_path: str
     output_dir: str = "exports"
+    original_filename: str | None = None
+    sharepoint_item_id: str | None = None
 
 
 class GeneratedFileOut(BaseModel):

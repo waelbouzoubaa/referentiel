@@ -144,5 +144,4 @@ docker compose exec api ls -la /app/exports
 
 - Le `Dockerfile` racine a été reconstruit (build multi-stage `uv` + Python 3.12, target `runtime`). À valider lors du premier `docker compose build` sur une VM neuve.
 - **Phase 5 non implémentée** : les changements de prix détectés (`product_audit`, `field_name=price`) ne génèrent pas encore de fichier Gery `PRICE_CHANGE` (seul `NEW_ARTICLE` est exporté actuellement).
-- **Bug connu** : `/api/v1/audit` affiche `source_file` sous forme de nom UUID temporaire au lieu du nom de fichier SharePoint réel.
 - **Agenor** : `gery_export.enabled: false` — aucun export Gery n'est généré pour ce fournisseur (arbitrage métier en attente).

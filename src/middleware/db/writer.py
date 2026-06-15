@@ -62,13 +62,21 @@ async def get_or_create_supplier_file(
     session: AsyncSession,
     supplier: Supplier,
     file_path: Path,
+    original_filename: str | None = None,
+    sharepoint_item_id: str | None = None,
 ) -> SupplierFile:
     """Retourne le SupplierFile existant pour ce hash ou en crée un nouveau.
 
     La déduplication par content_hash assure l'idempotence : retraiter le même
     fichier ne crée pas de doublon en base.
+
+    Args:
+        original_filename: Nom du fichier tel que vu sur SharePoint (le watcher
+            télécharge sous un nom temporaire UUID, sans rapport avec ce nom).
+        sharepoint_item_id: Identifiant de l'item SharePoint (drive item id).
     """
     content_hash = _file_hash(file_path)
+    filename = original_filename or file_path.name
 
     existing = await session.execute(
         select(SupplierFile).where(SupplierFile.content_hash == content_hash)
@@ -77,7 +85,7 @@ async def get_or_create_supplier_file(
     if supplier_file is not None:
         logger.info(
             "fichier déjà connu — réutilisation du SupplierFile existant",
-            filename=file_path.name,
+            filename=filename,
             content_hash=content_hash,
         )
         return supplier_file
@@ -86,8 +94,8 @@ async def get_or_create_supplier_file(
 
     supplier_file = SupplierFile(
         supplier_id=supplier.id,
-        filename=file_path.name,
-        sharepoint_item_id=file_path.name,
+        filename=filename,
+        sharepoint_item_id=sharepoint_item_id or filename,
         content_hash=content_hash,
         size_bytes=file_path.stat().st_size,
         gcs_path=str(file_path),

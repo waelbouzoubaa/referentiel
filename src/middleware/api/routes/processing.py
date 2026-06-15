@@ -110,7 +110,13 @@ async def generate_gery_exports_endpoint(
 
     # Supplier + fichier (idempotent via content_hash)
     supplier = await get_or_create_supplier(session, request.supplier_code)
-    supplier_file = await get_or_create_supplier_file(session, supplier, path)
+    supplier_file = await get_or_create_supplier_file(
+        session,
+        supplier,
+        path,
+        original_filename=request.original_filename,
+        sharepoint_item_id=request.sharepoint_item_id,
+    )
 
     # Delta réel depuis l'état PostgreSQL
     incoming_codes = {p.supplier_product_code for p in result.products}
