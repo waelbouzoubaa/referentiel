@@ -55,7 +55,7 @@ Services démarrés :
 | Service | URL / Port | Identifiants |
 |---|---|---|
 | API FastAPI | `http://<vm>:8000` (docs : `/docs`) | — |
-| Validation mappings IA (Streamlit) | `http://<vm>:8501` | — |
+| Validation mappings IA (Streamlit) | `http://<vm>:8503` | — |
 | MinIO Console | `http://<vm>:9011` | `minioadmin` / `minioadmin` |
 | MinIO API S3 | `http://<vm>:9010` | `minioadmin` / `minioadmin` |
 | n8n | `http://<vm>:5679` | `admin` / `changeme` (via `N8N_BASIC_AUTH_*`) |
@@ -152,7 +152,7 @@ Quand le watcher détecte un fichier dans un dossier SharePoint non mappé, il l
 à `POST /api/v1/ingest/unknown`, qui appelle Gemini pour proposer un YAML de mapping
 (`config/suppliers/`). La proposition est mise en attente (`/app/uploads/pending/{id}.json`).
 
-L'interface **Validation mappings IA** (`http://<vm>:8501`, service `review_ui`) permet de :
+L'interface **Validation mappings IA** (`http://<vm>:8503`, service `review_ui`) permet de :
 - relire un aperçu du fichier Excel source ;
 - éditer le YAML proposé (onglet "YAML") ou via un formulaire simplifié (onglet "Formulaire
   simplifié", disponible pour `extraction_mode: table`) ;
