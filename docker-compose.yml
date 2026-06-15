@@ -147,6 +147,21 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ── Interface de validation des mappings IA ─────────────────────────────────
+  review_ui:
+    build:
+      context: ./streamlit_review
+      dockerfile: Dockerfile
+    container_name: middleware-review-ui
+    environment:
+      MIDDLEWARE_API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   minio_data:

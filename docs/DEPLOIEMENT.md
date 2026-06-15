@@ -55,6 +55,7 @@ Services démarrés :
 | Service | URL / Port | Identifiants |
 |---|---|---|
 | API FastAPI | `http://<vm>:8000` (docs : `/docs`) | — |
+| Validation mappings IA (Streamlit) | `http://<vm>:8501` | — |
 | MinIO Console | `http://<vm>:9011` | `minioadmin` / `minioadmin` |
 | MinIO API S3 | `http://<vm>:9010` | `minioadmin` / `minioadmin` |
 | n8n | `http://<vm>:5679` | `admin` / `changeme` (via `N8N_BASIC_AUTH_*`) |
@@ -112,6 +113,11 @@ docker compose restart api
 docker compose up -d --build watcher
 ```
 
+**Recharger l'interface de validation des mappings IA** — `./streamlit_review` n'est PAS monté en volume, rebuild requis :
+```bash
+docker compose up -d --build review_ui
+```
+
 **Logs** :
 ```bash
 docker compose logs -f api
@@ -140,7 +146,22 @@ docker compose exec api sh -c "rm -f /app/exports/*.xlsx"
 docker compose exec api ls -la /app/exports
 ```
 
-## 10. Points d'attention connus
+## 10. Fournisseur inconnu — validation IA du mapping
+
+Quand le watcher détecte un fichier dans un dossier SharePoint non mappé, il l'envoie
+à `POST /api/v1/ingest/unknown`, qui appelle Gemini pour proposer un YAML de mapping
+(`config/suppliers/`). La proposition est mise en attente (`/app/uploads/pending/{id}.json`).
+
+L'interface **Validation mappings IA** (`http://<vm>:8501`, service `review_ui`) permet de :
+- relire un aperçu du fichier Excel source ;
+- éditer le YAML proposé (onglet "YAML") ou via un formulaire simplifié (onglet "Formulaire
+  simplifié", disponible pour `extraction_mode: table`) ;
+- valider (sauvegarde le YAML dans `config/suppliers/` et génère les exports Gery) ou rejeter.
+
+⚠️ Nécessite `GEMINI_API_KEY` renseigné dans `.env` — sans cette clé, un YAML placeholder
+(à compléter manuellement) est proposé.
+
+## 11. Points d'attention connus
 
 - Le `Dockerfile` racine a été reconstruit (build multi-stage `uv` + Python 3.12, target `runtime`). À valider lors du premier `docker compose build` sur une VM neuve.
 - **Phase 5 non implémentée** : les changements de prix détectés (`product_audit`, `field_name=price`) ne génèrent pas encore de fichier Gery `PRICE_CHANGE` (seul `NEW_ARTICLE` est exporté actuellement).

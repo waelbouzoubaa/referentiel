@@ -5,15 +5,17 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
+from middleware.ai.yaml_generator import read_excel_preview
 from middleware.core.logging import get_logger
 from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import generate_gery_exports
 from middleware.parser.grammar import MappingRule
-from middleware.parser.yaml_loader import load_mapping_rule
 from middleware.parser.matrix_extractor import parse_matrix_file
 from middleware.parser.multi_table_extractor import parse_multi_table_file
 from middleware.parser.table_extractor import parse_table_file
+from middleware.parser.yaml_loader import load_mapping_rule, validate_mapping_yaml
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -66,6 +68,51 @@ def list_pending() -> list[dict]:
 def get_pending(pending_id: str) -> dict:
     """Retourne le détail d'une demande de validation (YAML proposé inclus)."""
     return _load_pending(pending_id)
+
+
+class UpdateYamlRequest(BaseModel):
+    yaml_content: str
+
+
+class UpdateYamlResponse(BaseModel):
+    ok: bool
+    supplier_code: str
+
+
+@router.put("/review/{pending_id}", response_model=UpdateYamlResponse, tags=["validation"])
+def update_pending_yaml(pending_id: str, request: UpdateYamlRequest) -> UpdateYamlResponse:
+    """Valide et enregistre une édition du YAML proposé (avant approbation)."""
+    meta = _load_pending(pending_id)
+
+    if meta["status"] != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cette demande a déjà été {meta['status']}.",
+        )
+
+    rule, erreurs = validate_mapping_yaml(request.yaml_content)
+    if erreurs:
+        raise HTTPException(status_code=422, detail=erreurs)
+    assert rule is not None
+
+    meta["yaml_proposed"] = request.yaml_content
+    meta["supplier_guess"] = rule.supplier_code
+    (PENDING_DIR / f"{pending_id}.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    logger.info("yaml édité sauvegardé", pending_id=pending_id, supplier_code=rule.supplier_code)
+
+    return UpdateYamlResponse(ok=True, supplier_code=rule.supplier_code)
+
+
+@router.get("/review/{pending_id}/preview", tags=["validation"])
+def get_pending_preview(pending_id: str) -> dict:
+    """Retourne un aperçu texte du fichier Excel source."""
+    meta = _load_pending(pending_id)
+    file_path = Path(meta.get("file_path", ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Fichier source introuvable : {file_path}")
+    return {"preview": read_excel_preview(file_path)}
 
 
 @router.get("/review/{pending_id}/approve", response_class=HTMLResponse, tags=["validation"])

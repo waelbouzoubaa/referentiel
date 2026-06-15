@@ -65,7 +65,7 @@ gery_export:
 """
 
 
-def _read_excel_preview(file_path: Path, max_rows: int = 30) -> str:
+def read_excel_preview(file_path: Path, max_rows: int = 30) -> str:
     """Lit les premières lignes de l'Excel et les retourne sous forme de texte tabulé."""
     try:
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
@@ -125,7 +125,7 @@ def generate_yaml_from_excel(
     Returns:
         (supplier_code_guess, yaml_content)
     """
-    preview = _read_excel_preview(file_path)
+    preview = read_excel_preview(file_path)
 
     prompt = f"""Tu es un expert en configuration de middleware ERP et en extraction de données Excel.
 

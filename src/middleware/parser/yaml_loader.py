@@ -11,6 +11,41 @@ from middleware.parser.grammar import MappingRule
 logger = get_logger(__name__)
 
 
+def validate_mapping_yaml(yaml_text: str) -> tuple[MappingRule | None, list[str]]:
+    """Valide un contenu YAML de mapping fournisseur (chaîne).
+
+    Args:
+        yaml_text: Contenu YAML brut.
+
+    Returns:
+        (MappingRule, []) si valide, ou (None, [messages d'erreur]) sinon.
+    """
+    try:
+        from ruamel.yaml import YAML  # import tardif pour éviter l'erreur si non installé
+    except ImportError:
+        return None, ["ruamel.yaml non installé. Lancez : pip install ruamel.yaml"]
+
+    yaml = YAML(typ="safe")
+    try:
+        raw = yaml.load(yaml_text)
+    except Exception as exc:
+        return None, [f"Erreur de lecture YAML : {exc}"]
+
+    if not isinstance(raw, dict):
+        return None, [f"Le YAML doit être un dictionnaire, reçu : {type(raw).__name__}"]
+
+    try:
+        rule = MappingRule.model_validate(raw)
+    except ValidationError as exc:
+        erreurs = [
+            f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
+            for e in exc.errors()
+        ]
+        return None, erreurs
+
+    return rule, []
+
+
 def load_mapping_rule(path: Path) -> MappingRule:
     """Charge et valide un fichier YAML de mapping fournisseur.
 
@@ -24,42 +59,17 @@ def load_mapping_rule(path: Path) -> MappingRule:
         MappingValidationError: Si le fichier est introuvable, invalide ou
             échoue la validation Pydantic.
     """
-    try:
-        from ruamel.yaml import YAML  # import tardif pour éviter l'erreur si non installé
-    except ImportError as exc:
-        raise MappingValidationError(
-            "ruamel.yaml non installé. Lancez : pip install ruamel.yaml"
-        ) from exc
-
     if not path.exists():
         raise MappingValidationError(
             f"Fichier YAML introuvable : {path}",
         )
 
-    yaml = YAML(typ="safe")
-    try:
-        raw = yaml.load(path)
-    except Exception as exc:
+    rule, erreurs = validate_mapping_yaml(path.read_text(encoding="utf-8"))
+    if erreurs:
         raise MappingValidationError(
-            f"Erreur de lecture YAML ({path.name}) : {exc}",
-        ) from exc
-
-    if not isinstance(raw, dict):
-        raise MappingValidationError(
-            f"Le fichier YAML doit être un dictionnaire, reçu : {type(raw).__name__}",
+            f"Validation échouée pour {path.name} : {'; '.join(erreurs)}",
         )
-
-    try:
-        rule = MappingRule.model_validate(raw)
-    except ValidationError as exc:
-        erreurs = "; ".join(
-            f"{'.'.join(str(l) for l in e['loc'])}: {e['msg']}"
-            for e in exc.errors()
-        )
-        raise MappingValidationError(
-            f"Validation Pydantic échouée pour {path.name} : {erreurs}",
-            supplier_code=raw.get("supplier_code"),
-        ) from exc
+    assert rule is not None
 
     logger.info(
         "mapping YAML chargé",
