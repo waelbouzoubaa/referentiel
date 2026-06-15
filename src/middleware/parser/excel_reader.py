@@ -44,7 +44,7 @@ def read_workbook(path: Path, sheet_name: str | None = None) -> dict[str, Sheet]
 
 def _read_with_calamine(path: Path, sheet_name: str | None) -> dict[str, Sheet]:
     """Lecture rapide via python-calamine."""
-    from python_calamine import CalamineWorkbook  # type: ignore[import]
+    from python_calamine import CalamineWorkbook
 
     wb = CalamineWorkbook.from_path(str(path))
     sheets = {}
@@ -52,7 +52,7 @@ def _read_with_calamine(path: Path, sheet_name: str | None) -> dict[str, Sheet]:
         if sheet_name and name != sheet_name:
             continue
         sheet = wb.get_sheet_by_name(name)
-        sheets[name] = [list(row) for row in sheet.to_python()]
+        sheets[name] = [list(row) for row in sheet.to_python(skip_empty_area=False)]
     return sheets
 
 
@@ -67,7 +67,9 @@ def _read_with_openpyxl(path: Path, sheet_name: str | None) -> dict[str, Sheet]:
             continue
         ws = wb[name]
         rows: Sheet = []
-        for row in ws.iter_rows(values_only=True):
+        for row in ws.iter_rows(
+            min_row=1, min_col=1, max_row=ws.max_row, max_col=ws.max_column, values_only=True
+        ):
             rows.append(list(row))
         sheets[name] = rows
     wb.close()

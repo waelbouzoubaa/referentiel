@@ -1,3 +1,9 @@
+"""Tests de l'exporter Gery (NEW_ARTICLE).
+
+Note : NEW_ART_FRNS_CREATE et NEW_ART_FRNS_PRICE_UPDATE (Phase 5) ne sont pas
+encore implémentés — cf. tests xfail dans test_e2e_pipeline.py et
+docs/DEPLOIEMENT.md (section "Points d'attention connus").
+"""
 from __future__ import annotations
 
 from datetime import date
@@ -7,17 +13,10 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from middleware.delta.engine import ChangeType, DeltaResult, ProductDelta, compute_delta
-from middleware.exporter.gery import (
-    GeryExportResult,
-    generate_gery_exports,
-    _get_derived_codes,
-    _get_derived_codes_with_prices,
-)
+from middleware.delta.engine import compute_delta
+from middleware.exporter.gery import NEW_ARTICLE_COLS, _get_codes_with_prices, generate_gery_exports
 from middleware.parser.grammar import GeryExportConfig
 from middleware.parser.pivot import PricePivot, ProductPivot, VariantPivot
-from middleware.parser.table_extractor import compute_business_hash
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -49,8 +48,10 @@ def _make_matrix_product(code: str) -> ProductPivot:
                 variant_value="ALU",
                 variant_code="ALU",
                 prices=[
-                    PricePivot(price_type="list", amount=Decimal("10"), tier_min_quantity=Decimal("0"), tier_max_quantity=Decimal("500")),
-                    PricePivot(price_type="list", amount=Decimal("8"), tier_min_quantity=Decimal("500"), tier_max_quantity=Decimal("1000")),
+                    PricePivot(price_type="list", amount=Decimal("10"),
+                               tier_min_quantity=Decimal("0"), tier_max_quantity=Decimal("500")),
+                    PricePivot(price_type="list", amount=Decimal("8"),
+                               tier_min_quantity=Decimal("500"), tier_max_quantity=Decimal("1000")),
                 ],
             ),
             VariantPivot(
@@ -58,8 +59,10 @@ def _make_matrix_product(code: str) -> ProductPivot:
                 variant_value="BLANC",
                 variant_code="BLANC",
                 prices=[
-                    PricePivot(price_type="list", amount=Decimal("9"), tier_min_quantity=Decimal("0"), tier_max_quantity=Decimal("500")),
-                    PricePivot(price_type="list", amount=Decimal("7"), tier_min_quantity=Decimal("500"), tier_max_quantity=Decimal("1000")),
+                    PricePivot(price_type="list", amount=Decimal("9"),
+                               tier_min_quantity=Decimal("0"), tier_max_quantity=Decimal("500")),
+                    PricePivot(price_type="list", amount=Decimal("7"),
+                               tier_min_quantity=Decimal("500"), tier_max_quantity=Decimal("1000")),
                 ],
             ),
         ],
@@ -79,12 +82,13 @@ def _airisol_config() -> GeryExportConfig:
     return GeryExportConfig(
         enabled=True,
         flatten_strategy="cartesian",
+        derived_code_template="{designation} | {variant_code} | {tier_label}",
         defaults={"item_purchase_type": "Catalogue", "minimum_quantity": 1},
         price_export_mapping={"direct_unit_cost": "list"},
     )
 
 
-def _delta_with_creates(products: list[ProductPivot]) -> DeltaResult:
+def _delta_with_creates(products: list[ProductPivot]):
     return compute_delta(products, known_hashes={})
 
 
@@ -93,17 +97,14 @@ def _delta_with_creates(products: list[ProductPivot]) -> DeltaResult:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_export_disabled_produces_no_files(tmp_path: Path) -> None:
-    config = GeryExportConfig(
-        enabled=False,
-        blocked_reason="Test disabled",
-    )
+    config = GeryExportConfig(enabled=False, blocked_reason="Test disabled")
     delta = _delta_with_creates([_make_simple_product("CODE001")])
     result = generate_gery_exports(delta, config, "test", tmp_path)
     assert result.files == []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tests — CREATE → NEW_ARTICLE + NEW_ART_FRNS_CREATE
+# Tests — CREATE → NEW_ARTICLE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_creates_produce_new_article_file(tmp_path: Path) -> None:
@@ -112,9 +113,7 @@ def test_creates_produce_new_article_file(tmp_path: Path) -> None:
     result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
 
     kinds = {f.kind for f in result.files}
-    assert "NEW_ARTICLE" in kinds
-    assert "NEW_ART_FRNS_CREATE" in kinds
-    assert "NEW_ART_FRNS_PRICE_UPDATE" not in kinds
+    assert kinds == {"NEW_ARTICLE"}
 
 
 def test_new_article_line_count(tmp_path: Path) -> None:
@@ -135,79 +134,50 @@ def test_new_article_excel_content(tmp_path: Path) -> None:
     wb = openpyxl.load_workbook(na.path)
     ws = wb.active
 
-    # En-tête ligne 1, données ligne 2
-    header = [ws.cell(row=1, column=c).value for c in range(1, 11)]
-    assert "Code article" in header
-    assert "Désignation" in header
+    header = [ws.cell(row=1, column=c).value for c in range(1, len(NEW_ARTICLE_COLS) + 1)]
+    assert "Code article Frns" in header
+    assert "Description" in header
 
-    code_col = header.index("Code article") + 1
+    code_col = header.index("Code article Frns") + 1
     assert ws.cell(row=2, column=code_col).value == "CODE001"
 
 
-def test_frns_create_prix_installer(tmp_path: Path) -> None:
+def test_new_article_direct_unit_cost_uses_price_mapping(tmp_path: Path) -> None:
     products = [_make_simple_product("CODE001", installer="85")]
     delta = _delta_with_creates(products)
     result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
 
-    frns = next(f for f in result.files if f.kind == "NEW_ART_FRNS_CREATE")
-    wb = openpyxl.load_workbook(frns.path)
+    na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
+    wb = openpyxl.load_workbook(na.path)
     ws = wb.active
 
-    header = [ws.cell(row=1, column=c).value for c in range(1, 11)]
-    prix_col = header.index("Prix unitaire direct") + 1
-    assert ws.cell(row=2, column=prix_col).value == pytest.approx(85.0)
+    header = [ws.cell(row=1, column=c).value for c in range(1, len(NEW_ARTICLE_COLS) + 1)]
+    cost_col = header.index("Direct Unit Cost") + 1
+    assert ws.cell(row=2, column=cost_col).value == pytest.approx(85.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tests — PRICE_CHANGE → NEW_ART_FRNS_PRICE_UPDATE
+# Tests — codes article dérivés (produits simples et matriciels)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_price_changes_produce_price_update_file(tmp_path: Path) -> None:
-    old = [_make_simple_product("CODE001", installer="90")]
-    new = [_make_simple_product("CODE001", installer="80")]
-    delta = compute_delta(new, known_hashes={p.supplier_product_code: compute_business_hash(p) for p in old})
-
-    result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
-
-    kinds = {f.kind for f in result.files}
-    assert "NEW_ART_FRNS_PRICE_UPDATE" in kinds
-    assert "NEW_ARTICLE" not in kinds
-
-
-def test_price_update_nouveau_prix(tmp_path: Path) -> None:
-    old = [_make_simple_product("CODE001", installer="90")]
-    new = [_make_simple_product("CODE001", installer="80")]
-    delta = compute_delta(new, known_hashes={p.supplier_product_code: compute_business_hash(p) for p in old})
-
-    result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
-    pu = next(f for f in result.files if f.kind == "NEW_ART_FRNS_PRICE_UPDATE")
-    wb = openpyxl.load_workbook(pu.path)
-    ws = wb.active
-
-    header = [ws.cell(row=1, column=c).value for c in range(1, 7)]
-    prix_col = header.index("Nouveau prix unitaire direct") + 1
-    assert ws.cell(row=2, column=prix_col).value == pytest.approx(80.0)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tests — Produits avec variantes (Airisol flatten=cartesian)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def test_derived_codes_simple_product() -> None:
+def test_codes_with_prices_simple_product() -> None:
     p = _make_simple_product("CODE001")
-    delta = ProductDelta(ChangeType.CREATE, "CODE001", "test", new_product=p)
-    codes = _get_derived_codes(p, delta)
-    assert codes == ["CODE001"]
+    codes = _get_codes_with_prices(p, "installer", None)
+    assert [code for code, _ in codes] == ["CODE001"]
 
 
-def test_derived_codes_matrix_product() -> None:
+def test_codes_with_prices_matrix_product() -> None:
     p = _make_matrix_product("PANN001")
-    delta = ProductDelta(ChangeType.CREATE, "PANN001", "airisol", new_product=p)
-    codes = _get_derived_codes(p, delta)
+    config = _airisol_config()
+    codes = _get_codes_with_prices(
+        p, config.price_export_mapping.direct_unit_cost, config.derived_code_template
+    )
+
     # 2 variantes × 2 paliers = 4 codes
-    assert len(codes) == 4
-    assert any("ALU-T1" in c for c in codes)
-    assert any("BLANC-T2" in c for c in codes)
+    rendered = [code for code, _ in codes]
+    assert len(rendered) == 4
+    assert any("ALU" in c for c in rendered)
+    assert any("BLANC" in c for c in rendered)
 
 
 def test_matrix_product_new_article_line_count(tmp_path: Path) -> None:
@@ -235,7 +205,7 @@ def test_generated_file_exists(tmp_path: Path) -> None:
 
 
 def test_empty_delta_produces_no_files(tmp_path: Path) -> None:
-    delta = DeltaResult()
+    delta = compute_delta([], known_hashes={})
     result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
     assert result.files == []
 
@@ -250,16 +220,12 @@ def test_validity_dates_in_new_article(tmp_path: Path) -> None:
     start = date(2026, 1, 1)
     end = date(2026, 12, 31)
     result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path,
-                                   validity_start=start, validity_end=end)
+                                    validity_start=start, validity_end=end)
 
     na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
     wb = openpyxl.load_workbook(na.path)
     ws = wb.active
-    header = [ws.cell(row=1, column=c).value for c in range(1, 11)]
+    header = [ws.cell(row=1, column=c).value for c in range(1, len(NEW_ARTICLE_COLS) + 1)]
 
-    deb_col = header.index("Date début validité") + 1
-    cell_value = ws.cell(row=2, column=deb_col).value
-    # openpyxl relit les dates comme datetime — on compare la partie date
-    if hasattr(cell_value, "date"):
-        cell_value = cell_value.date()
-    assert cell_value == start
+    deb_col = header.index("Starting Date") + 1
+    assert ws.cell(row=2, column=deb_col).value == start.isoformat()
