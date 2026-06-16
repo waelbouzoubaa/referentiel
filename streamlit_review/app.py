@@ -1149,23 +1149,37 @@ except Exception as exc:
     st.error(f"Impossible de contacter l'API ({API_URL}) : {exc}")
     st.stop()
 
-status_options = ["pending", "approved", "rejected", "tous"]
-status_filter = st.sidebar.selectbox("Statut", status_options, index=0)
+# Chaque statut a sa propre liste (pas de mélange). Compteurs pour s'y retrouver.
+counts = {"pending": 0, "approved": 0, "rejected": 0}
+for it in pending_items:
+    counts[it["status"]] = counts.get(it["status"], 0) + 1
 
-filtered = pending_items if status_filter == "tous" else [
-    item for item in pending_items if item["status"] == status_filter
-]
+statut_labels = {
+    "pending": f"En attente ({counts['pending']})",
+    "approved": f"Validés ({counts['approved']})",
+    "rejected": f"Rejetés ({counts['rejected']})",
+}
+statut = st.sidebar.radio(
+    "Statut",
+    options=["pending", "approved", "rejected"],
+    format_func=lambda s: statut_labels[s],
+    key="statut_filter",
+)
+
+filtered = [item for item in pending_items if item["status"] == statut]
 
 if not filtered:
-    st.sidebar.info("Aucune demande pour ce filtre.")
-    st.info("Aucune demande à traiter pour le moment.")
+    libelle = {"pending": "en attente", "approved": "validée", "rejected": "rejetée"}[statut]
+    st.info(f"Aucune demande {libelle} pour le moment.")
     st.stop()
 
-labels = [
-    f"{item['filename']} — {item['supplier_guess']} ({item['status']})" for item in filtered
-]
+# Le statut est déjà choisi à gauche → on n'affiche que fichier + fournisseur.
+labels = [f"{item['filename']} — {item['supplier_guess']}" for item in filtered]
 selected_idx = st.sidebar.radio(
-    "Demandes", options=range(len(filtered)), format_func=lambda i: labels[i]
+    "Demandes",
+    options=range(len(filtered)),
+    format_func=lambda i: labels[i],
+    key=f"demande_{statut}",
 )
 pending_id = filtered[selected_idx]["id"]
 
