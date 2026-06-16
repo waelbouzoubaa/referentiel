@@ -7,29 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.api.schemas import (
     DeltaSummary,
+    GeneratedFileOut,
     GenerateExportsRequest,
     GenerateExportsResponse,
-    GeneratedFileOut,
     ProcessFileRequest,
     ProcessFileResponse,
 )
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
-from middleware.db.writer import (
-    get_known_hashes,
-    get_or_create_supplier,
-    get_or_create_supplier_file,
-    mark_file_processed,
-    persist_delta,
-    persist_gery_export,
-)
 from middleware.delta.engine import compute_delta
-from middleware.exporter.gery import generate_gery_exports
 from middleware.parser.grammar import MappingRule
-from middleware.parser.matrix_extractor import parse_matrix_file
-from middleware.parser.multi_table_extractor import parse_multi_table_file
-from middleware.parser.table_extractor import parse_table_file
 from middleware.parser.yaml_loader import load_all_mappings
+from middleware.pipeline import parse_with_rule, process_and_export
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -100,65 +89,21 @@ async def generate_gery_exports_endpoint(
     request: GenerateExportsRequest,
     session: AsyncSession = Depends(get_session),
 ) -> GenerateExportsResponse:
-    """Parse un fichier fournisseur, calcule le delta réel vs PostgreSQL, persiste en base et génère le fichier NEW_ARTICLE Gery."""
+    """Traite un fichier (parse + delta vs PostgreSQL), persiste et génère le CSV Gery."""
     path = Path(request.file_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
 
     rule = _load_rule(request.supplier_code)
-    result = _parse_with_rule(path, rule)
 
-    # Supplier + fichier (idempotent via content_hash)
-    supplier = await get_or_create_supplier(session, request.supplier_code)
-    supplier_file = await get_or_create_supplier_file(
+    # Parse + archivage MinIO + delta vs PostgreSQL + persistance + export (service partagé)
+    _, _, export_result = await process_and_export(
         session,
-        supplier,
+        rule,
         path,
+        Path(request.output_dir),
         original_filename=request.original_filename,
         sharepoint_item_id=request.sharepoint_item_id,
-    )
-
-    # Delta réel depuis l'état PostgreSQL
-    incoming_codes = {p.supplier_product_code for p in result.products}
-    known_hashes, known_hashes_no_prices, deleted_codes = await get_known_hashes(
-        session, supplier.id, rule.upload_mode, incoming_codes
-    )
-    delta = compute_delta(
-        result.products,
-        known_hashes=known_hashes,
-        known_hashes_no_prices=known_hashes_no_prices,
-        deleted_codes=deleted_codes,
-    )
-
-    # Persistance delta
-    await persist_delta(session, delta, supplier.id, supplier_file.id)
-
-    # Export Gery (seulement NEW_ARTICLE)
-    output_dir = Path(request.output_dir)
-    export_result = generate_gery_exports(
-        delta=delta,
-        export_config=rule.gery_export,
-        supplier_code=request.supplier_code,
-        output_dir=output_dir,
-        validity_start=result.file_metadata.validity_start,
-        validity_end=result.file_metadata.validity_end,
-    )
-
-    # Persistance export Gery en base + marque product_history
-    await persist_gery_export(session, export_result, supplier.id, supplier_file.id)
-    await mark_file_processed(session, supplier_file)
-
-    logger.info(
-        "generate-gery-exports terminé",
-        supplier_code=request.supplier_code,
-        fichier=path.name,
-        produits=len(result.products),
-        creates=len(delta.creates),
-        updates=len(delta.updates),
-        price_changes=len(delta.price_changes),
-        deletes=len(delta.deletes),
-        reactivates=len(delta.reactivates),
-        unchanged=delta.unchanged,
     )
 
     return GenerateExportsResponse(
@@ -195,15 +140,8 @@ def _load_rule(supplier_code: str) -> MappingRule:
 
 
 def _parse_with_rule(path: Path, rule: MappingRule):
-    """Dispatch vers le bon parseur selon extraction_mode."""
-    if rule.extraction_mode == "table":
-        return parse_table_file(path, rule)
-    elif rule.extraction_mode == "matrix":
-        return parse_matrix_file(path, rule)
-    elif rule.extraction_mode == "multi_table":
-        return parse_multi_table_file(path, rule)
-    else:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Mode d'extraction non supporté : '{rule.extraction_mode}'",
-        )
+    """Dispatch vers le bon parseur (cf. pipeline.parse_with_rule), erreurs en 422."""
+    try:
+        return parse_with_rule(path, rule)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

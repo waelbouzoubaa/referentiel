@@ -3,19 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.ai.yaml_generator import read_excel_preview
 from middleware.core.logging import get_logger
-from middleware.delta.engine import compute_delta
-from middleware.exporter.gery import generate_gery_exports
-from middleware.parser.grammar import MappingRule
-from middleware.parser.matrix_extractor import parse_matrix_file
-from middleware.parser.multi_table_extractor import parse_multi_table_file
-from middleware.parser.table_extractor import parse_table_file
-from middleware.parser.yaml_loader import load_mapping_rule, validate_mapping_yaml
+from middleware.db.session import get_session
+from middleware.parser.yaml_loader import validate_mapping_yaml
+from middleware.pipeline import process_and_export
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -116,8 +113,10 @@ def get_pending_preview(pending_id: str) -> dict:
 
 
 @router.get("/review/{pending_id}/approve", response_class=HTMLResponse, tags=["validation"])
-def approve_pending(pending_id: str) -> HTMLResponse:
-    """Approuve le YAML proposé, le sauvegarde et retraite le fichier."""
+async def approve_pending(
+    pending_id: str, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    """Approuve le YAML, le sauvegarde, puis traite le fichier (DB + MinIO + export CSV)."""
     meta = _load_pending(pending_id)
 
     if meta["status"] != "pending":
@@ -127,51 +126,69 @@ def approve_pending(pending_id: str) -> HTMLResponse:
             color="#888",
         )
 
+    # Valider le YAML avant toute écriture
     yaml_content = meta["yaml_proposed"]
-    supplier_code = meta["supplier_guess"]
+    rule, erreurs = validate_mapping_yaml(yaml_content)
+    if erreurs or rule is None:
+        return _html_page(
+            "YAML invalide",
+            "Corrigez la configuration avant de valider :<br>" + "<br>".join(erreurs),
+            color="#c0392b",
+        )
+    supplier_code = rule.supplier_code
 
-    # Sauvegarder le YAML
+    # Sauvegarder le YAML dans le référentiel de configuration
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     yaml_path = CONFIG_DIR / f"{supplier_code}_v1.yaml"
     yaml_path.write_text(yaml_content, encoding="utf-8")
     logger.info("yaml approuvé sauvegardé", path=str(yaml_path))
 
-    # Retraiter le fichier en attente
     file_path = Path(meta.get("file_path", ""))
-    exports_info = []
-    if file_path.exists():
-        try:
-            rule = load_mapping_rule(yaml_path)
-            result = _parse_with_rule(file_path, rule)
-            delta = compute_delta(result.products, known_hashes={})
-            EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            export_result = generate_gery_exports(
-                delta=delta,
-                export_config=rule.gery_export,
-                supplier_code=supplier_code,
-                output_dir=EXPORTS_DIR,
-                validity_start=result.file_metadata.validity_start,
-                validity_end=result.file_metadata.validity_end,
-            )
-            exports_info = [f"{f.kind} ({f.line_count} lignes)" for f in export_result.files]
-            logger.info("fichier retraité après approbation", supplier=supplier_code, exports=exports_info)
-        except Exception as exc:
-            logger.error("erreur retraitement après approbation", erreur=str(exc))
-            exports_info = [f"Erreur : {exc}"]
-    else:
-        exports_info = ["Fichier source introuvable — à retraiter manuellement."]
+    if not file_path.exists():
+        return _html_page(
+            "Fichier source introuvable",
+            f"Le YAML de <strong>{supplier_code}</strong> est enregistré, mais le fichier "
+            f"source est introuvable — à retraiter manuellement.",
+            color="#c0392b",
+        )
 
-    # Mettre à jour le statut
+    # Traitement complet via le service partagé (archivage MinIO, DB, export CSV)
+    try:
+        EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        _, _, export_result = await process_and_export(
+            session,
+            rule,
+            file_path,
+            EXPORTS_DIR,
+            original_filename=meta.get("filename"),
+            sharepoint_item_id=meta.get("sharepoint_item_id"),
+        )
+    except Exception as exc:
+        await session.rollback()
+        logger.error("erreur traitement après approbation", erreur=str(exc))
+        return _html_page(
+            "Erreur de traitement",
+            f"Le YAML est enregistré mais le traitement a échoué : {exc}",
+            color="#c0392b",
+        )
+
+    exports = [f.path.name for f in export_result.files]
+
+    # Marquer approuvé + mémoriser les fichiers générés (pour le téléchargement)
     meta["status"] = "approved"
+    meta["supplier_code"] = supplier_code
+    meta["exports"] = exports
     (PENDING_DIR / f"{pending_id}.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    exports_html = "<br>".join(f"• {e}" for e in exports_info) or "Aucun export généré."
+    exports_html = "<br>".join(
+        f"• {e} ({f.line_count} lignes)" for e, f in zip(exports, export_result.files, strict=True)
+    ) or "Aucun fichier généré (export désactivé ou aucun changement)."
     return _html_page(
         "✓ YAML approuvé",
-        f"Le fournisseur <strong>{supplier_code}</strong> est maintenant configuré.<br><br>"
-        f"Exports Gery générés :<br>{exports_html}",
+        f"Le fournisseur <strong>{supplier_code}</strong> est configuré et traité.<br><br>"
+        f"Fichiers Gery générés :<br>{exports_html}",
         color="#1a7f5a",
     )
 
@@ -197,12 +214,24 @@ def reject_pending(pending_id: str) -> HTMLResponse:
     )
 
 
-def _parse_with_rule(path: Path, rule: MappingRule):
-    if rule.extraction_mode == "table":
-        return parse_table_file(path, rule)
-    elif rule.extraction_mode == "matrix":
-        return parse_matrix_file(path, rule)
-    elif rule.extraction_mode == "multi_table":
-        return parse_multi_table_file(path, rule)
-    else:
-        raise ValueError(f"Mode non supporté : {rule.extraction_mode}")
+@router.get("/review/{pending_id}/download", tags=["validation"])
+def download_export(pending_id: str, filename: str | None = None) -> FileResponse:
+    """Télécharge un fichier Gery (CSV) généré pour une demande approuvée.
+
+    `filename` doit faire partie des exports enregistrés pour cette demande
+    (protection contre la traversée de chemin). Par défaut, le premier export.
+    """
+    meta = _load_pending(pending_id)
+    exports = meta.get("exports") or []
+    if not exports:
+        raise HTTPException(status_code=404, detail="Aucun fichier généré pour cette demande.")
+
+    target = filename or exports[0]
+    if target not in exports:
+        raise HTTPException(status_code=404, detail=f"Fichier inconnu : {target}")
+
+    path = EXPORTS_DIR / target
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Fichier introuvable : {target}")
+
+    return FileResponse(path, media_type="text/csv", filename=target)

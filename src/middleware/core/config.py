@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Le .env est partagé avec le watcher (TENANT_ID, CLIENT_ID, etc.) :
+        # on ignore les variables non préfixées MIDDLEWARE_ au lieu de planter.
+        extra="ignore",
     )
 
     # ── Application ──────────────────────────────────────────────────────────

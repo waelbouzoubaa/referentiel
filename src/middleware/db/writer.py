@@ -460,16 +460,23 @@ async def persist_gery_export(
                 line_number=line_number,
             ))
 
-        # Marque les lignes d'historique CREATE/REACTIVATE de ce fichier comme exportées
-        await session.execute(
-            update(ProductHistory)
-            .where(
-                ProductHistory.source_file_id == file_id,
-                ProductHistory.exported_at.is_(None),
-                ProductHistory.change_type.in_(["CREATE", "REACTIVATE"]),
+        # Marque les lignes d'historique de ce fichier comme exportées. Le fichier
+        # NEW_ARTICLE couvre les créations, réactivations et lignes modifiées
+        # (Gery distingue création/MAJ par la clé à l'import).
+        change_types_par_kind = {
+            "NEW_ARTICLE": ["CREATE", "REACTIVATE", "UPDATE", "PRICE_CHANGE"],
+        }
+        change_types = change_types_par_kind.get(gen_file.kind, [])
+        if change_types:
+            await session.execute(
+                update(ProductHistory)
+                .where(
+                    ProductHistory.source_file_id == file_id,
+                    ProductHistory.exported_at.is_(None),
+                    ProductHistory.change_type.in_(change_types),
+                )
+                .values(exported_at=datetime.utcnow(), exported_in_id=gery_export.id)
             )
-            .values(exported_at=datetime.utcnow(), exported_in_id=gery_export.id)
-        )
 
     logger.info(
         "exports Gery persistés en base",

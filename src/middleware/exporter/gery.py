@@ -1,14 +1,12 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-
-import openpyxl
-from openpyxl.styles import Font, PatternFill
 
 from middleware.core.logging import get_logger
 from middleware.delta.engine import DeltaResult, ProductDelta
@@ -84,8 +82,11 @@ def generate_gery_exports(
     price_field = export_config.price_export_mapping.direct_unit_cost
     code_template = export_config.derived_code_template
 
+    # Fichier d'import unique NEW ARTICLE : créations, réactivations ET lignes
+    # modifiées (UPDATE/PRICE_CHANGE). Gery distingue création vs mise à jour à
+    # l'import sur la clé d'unicité (Code Fournisseur SAGE + Code article Frns).
     rows, row_details = _build_rows(
-        delta.creates + delta.reactivates,
+        delta.creates + delta.reactivates + delta.updates + delta.price_changes,
         defaults,
         price_field,
         code_template,
@@ -94,8 +95,8 @@ def generate_gery_exports(
     )
 
     if rows:
-        path = output_dir / f"NEW_ARTICLE_{supplier_code}.xlsx"
-        _write_excel(path, "NEW_ARTICLE", NEW_ARTICLE_COLS, rows)
+        path = output_dir / f"NEW_ARTICLE_{supplier_code}.csv"
+        _write_csv(path, NEW_ARTICLE_COLS, rows)
         result.files.append(GeneratedFile(
             kind="NEW_ARTICLE",
             path=path,
@@ -249,30 +250,20 @@ def _format_tier_label(price: PricePivot) -> str:
 # Écriture Excel
 # ─────────────────────────────────────────────────────────────────────────────
 
-_HEADER_FILL = PatternFill(start_color="1F497D", end_color="1F497D", fill_type="solid")
-_HEADER_FONT = Font(color="FFFFFF", bold=True)
+# Séparateur ';' + BOM UTF-8 : ouverture propre dans Excel FR ; l'intégration
+# Gery se fera par un ETL qui fait un UPDATE sur la clé. Format final à confirmer
+# avec Rémi (cf. brief §12).
+_CSV_DELIMITER = ";"
 
 
-def _write_excel(path: Path, sheet_name: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet_name
-
-    for col_idx, col_name in enumerate(columns, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=col_name)
-        cell.font = _HEADER_FONT
-        cell.fill = _HEADER_FILL
-
-    for row_idx, row_data in enumerate(rows, start=2):
-        for col_idx, col_name in enumerate(columns, start=1):
-            ws.cell(row=row_idx, column=col_idx, value=row_data.get(col_name))
-
-    for col_idx, col_name in enumerate(columns, start=1):
-        ws.column_dimensions[
-            openpyxl.utils.get_column_letter(col_idx)
-        ].width = max(len(col_name) + 2, 16)
-
-    wb.save(path)
+def _write_csv(path: Path, columns: list[str], rows: list[dict[str, Any]]) -> None:
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=columns, delimiter=_CSV_DELIMITER, extrasaction="ignore"
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 def _file_hash(path: Path) -> str:

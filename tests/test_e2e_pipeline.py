@@ -158,7 +158,7 @@ def test_e2e_atlantic_idempotence(tmp_path: Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# E2E 3 — Mise à jour de prix → PRICE_CHANGE → NEW_ART_FRNS_PRICE_UPDATE
+# E2E 3 — Mise à jour de prix → PRICE_CHANGE → inclus dans NEW_ARTICLE (brief §6)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_e2e_atlantic_price_update(tmp_path: Path) -> None:
@@ -186,36 +186,12 @@ def test_e2e_atlantic_price_update(tmp_path: Path) -> None:
     export_dir = tmp_path / "exports"
     gery = generate_gery_exports(delta, rule.gery_export, rule.supplier_code, export_dir)
 
+    # Brief §6 : les lignes modifiées vont dans le fichier NEW_ARTICLE unique ;
+    # Gery distingue création/MAJ par la clé à l'import.
     kinds = {f.kind for f in gery.files}
-    assert "NEW_ARTICLE" not in kinds
-
-
-@pytest.mark.xfail(reason="Phase 5 non implémentée : NEW_ART_FRNS_PRICE_UPDATE", strict=False)
-def test_e2e_atlantic_price_update_frns_price_update(tmp_path: Path) -> None:
-    rule = _atlantic_rule()
-
-    path1 = _make_atlantic_file(tmp_path / "v1", nb=3, installer_price_offset=0.0)
-    result1 = parse_table_file(path1, rule)
-    known_hashes = {p.supplier_product_code: compute_business_hash(p) for p in result1.products}
-    known_hashes_no_prices = {
-        p.supplier_product_code: compute_business_hash_no_prices(p) for p in result1.products
-    }
-
-    (tmp_path / "v2").mkdir()
-    path2 = _make_atlantic_file(tmp_path / "v2", nb=3, installer_price_offset=-5.0)
-    result2 = parse_table_file(path2, rule)
-    delta = compute_delta(
-        result2.products, known_hashes=known_hashes, known_hashes_no_prices=known_hashes_no_prices
-    )
-
-    export_dir = tmp_path / "exports"
-    gery = generate_gery_exports(delta, rule.gery_export, rule.supplier_code, export_dir)
-
-    kinds = {f.kind for f in gery.files}
-    assert "NEW_ART_FRNS_PRICE_UPDATE" in kinds
-
-    pu = next(f for f in gery.files if f.kind == "NEW_ART_FRNS_PRICE_UPDATE")
-    assert pu.line_count == 3
+    assert "NEW_ARTICLE" in kinds
+    na = next(f for f in gery.files if f.kind == "NEW_ARTICLE")
+    assert na.line_count == 3
 
 
 # ─────────────────────────────────────────────────────────────────────────────

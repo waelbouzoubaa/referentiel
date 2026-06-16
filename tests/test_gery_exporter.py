@@ -1,22 +1,29 @@
-"""Tests de l'exporter Gery (NEW_ARTICLE).
+"""Tests de l'exporter Gery (NEW_ARTICLE, format CSV).
 
-Note : NEW_ART_FRNS_CREATE et NEW_ART_FRNS_PRICE_UPDATE (Phase 5) ne sont pas
-encore implémentés — cf. tests xfail dans test_e2e_pipeline.py et
-docs/DEPLOIEMENT.md (section "Points d'attention connus").
+Le fichier NEW_ARTICLE contient créations + réactivations + lignes modifiées
+(brief §6) ; Gery distingue création/MAJ par la clé à l'import.
 """
 from __future__ import annotations
 
+import csv
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-import openpyxl
 import pytest
 
 from middleware.delta.engine import compute_delta
-from middleware.exporter.gery import NEW_ARTICLE_COLS, _get_codes_with_prices, generate_gery_exports
+from middleware.exporter.gery import _get_codes_with_prices, generate_gery_exports
 from middleware.parser.grammar import GeryExportConfig
 from middleware.parser.pivot import PricePivot, ProductPivot, VariantPivot
+
+
+def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    """Relit un CSV Gery (séparateur ';', BOM UTF-8) → (en-têtes, lignes)."""
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f, delimiter=";")
+        rows = list(reader)
+        return list(reader.fieldnames or []), rows
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -125,21 +132,17 @@ def test_new_article_line_count(tmp_path: Path) -> None:
     assert na.line_count == 5
 
 
-def test_new_article_excel_content(tmp_path: Path) -> None:
+def test_new_article_csv_content(tmp_path: Path) -> None:
     products = [_make_simple_product("CODE001")]
     delta = _delta_with_creates(products)
     result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
 
     na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
-    wb = openpyxl.load_workbook(na.path)
-    ws = wb.active
-
-    header = [ws.cell(row=1, column=c).value for c in range(1, len(NEW_ARTICLE_COLS) + 1)]
+    assert na.path.suffix == ".csv"
+    header, rows = _read_csv(na.path)
     assert "Code article Frns" in header
     assert "Description" in header
-
-    code_col = header.index("Code article Frns") + 1
-    assert ws.cell(row=2, column=code_col).value == "CODE001"
+    assert rows[0]["Code article Frns"] == "CODE001"
 
 
 def test_new_article_direct_unit_cost_uses_price_mapping(tmp_path: Path) -> None:
@@ -148,12 +151,8 @@ def test_new_article_direct_unit_cost_uses_price_mapping(tmp_path: Path) -> None
     result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
 
     na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
-    wb = openpyxl.load_workbook(na.path)
-    ws = wb.active
-
-    header = [ws.cell(row=1, column=c).value for c in range(1, len(NEW_ARTICLE_COLS) + 1)]
-    cost_col = header.index("Direct Unit Cost") + 1
-    assert ws.cell(row=2, column=cost_col).value == pytest.approx(85.0)
+    _, rows = _read_csv(na.path)
+    assert float(rows[0]["Direct Unit Cost"]) == pytest.approx(85.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -223,9 +222,5 @@ def test_validity_dates_in_new_article(tmp_path: Path) -> None:
                                     validity_start=start, validity_end=end)
 
     na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
-    wb = openpyxl.load_workbook(na.path)
-    ws = wb.active
-    header = [ws.cell(row=1, column=c).value for c in range(1, len(NEW_ARTICLE_COLS) + 1)]
-
-    deb_col = header.index("Starting Date") + 1
-    assert ws.cell(row=2, column=deb_col).value == start.isoformat()
+    _, rows = _read_csv(na.path)
+    assert rows[0]["Starting Date"] == start.isoformat()
