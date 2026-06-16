@@ -5,11 +5,13 @@ import re
 from pathlib import Path
 
 import openpyxl
+
 from middleware.core.logging import get_logger
+from middleware.parser.grammar import TRANSFORMS_VALIDES
 
 logger = get_logger(__name__)
 
-_EXAMPLE_YAML = """\
+_EXAMPLE_TABLE = """\
 supplier_code: "mon_fournisseur"
 mapping_version: 1
 description: "Fournisseur X — gamme produits Y"
@@ -62,6 +64,195 @@ gery_export:
     unit_of_measure: "U"
   price_export_mapping:
     direct_unit_cost: "installer"
+"""
+
+_EXAMPLE_MATRIX = r"""\
+supplier_code: "mon_fournisseur_isolation"
+mapping_version: 1
+description: "Exemple matrix — grille de prix multi-paliers et multi-variantes"
+upload_mode: "full"
+
+sheet_match: "Tarif 2026"
+header_detection:
+  mode: explicit
+  row: 9
+data_starts_row: 10
+
+extraction_mode: matrix
+
+row_filter:
+  must_have_value_in: ["C"]
+  must_have_value_in_any: ["G", "I", "K"]
+
+data_zone:
+  rows: "10:31"
+  product_columns: "A:F"
+  price_matrix_columns: "G:L"
+
+product_columns:
+  family:
+    source_col: "A"
+    transform: "strip"
+  subfamily:
+    source_col: "B"
+    transform: "strip"
+  designation:
+    source_col: "C"
+    transform: "strip"
+    required: true
+  supplier_product_code:
+    derived_from: "{designation} | EP{epaisseur}"
+    required: true
+
+attributes:
+  - key: "epaisseur"
+    source_col: "E"
+    data_type: "decimal"
+    unit: "mm"
+  - key: "r_value"
+    source_col: "F"
+    data_type: "decimal"
+    unit: "m².K/W"
+
+price_matrix:
+  tier_axis:
+    header_row: 8
+    type: "quantity_range"
+    fallback_unit: "m²"
+    detect_per_block: true
+  variant_axis:
+    header_row: 9
+    dimension_name: "couleur"
+  column_groups:
+    - columns: ["G", "H"]
+      tier_label: "0-500m²"
+      variants: ["ALU", "BLANC"]
+    - columns: ["I", "J"]
+      tier_label: "500-1000m²"
+      variants: ["ALU", "BLANC"]
+    - columns: ["K", "L"]
+      tier_label: ">1000m²"
+      variants: ["ALU", "BLANC"]
+  price_type: "list"
+  currency: "EUR"
+  transform: "parse_decimal_fr"
+
+commercial_rules:
+  - source_col: "M"
+    rule_type: "franco"
+    threshold_unit: "m²"
+    parse_pattern: "(\\d+)\\s*m²"
+    applies_to: "product"
+
+file_metadata:
+  validity_start:
+    cell: "E4"
+    transform: "parse_date_iso"
+  validity_end:
+    cell: "J4"
+    transform: "parse_date_iso"
+  client_article_code:
+    regex: "Code article Ramery\\s*:\\s*(\\d+)"
+    in_cell: "A6"
+
+gery_export:
+  enabled: true
+  flatten_strategy: "cartesian"
+  derived_code_template: "{designation} | ep{epaisseur} | {variant_code} | {tier_label}"
+  defaults:
+    item_purchase_type: "Catalogue"
+    minimum_quantity: 1
+    code_tva: "TVA20"
+    unit_of_measure: "M2"
+  price_export_mapping:
+    direct_unit_cost: "list"
+"""
+
+_EXAMPLE_MULTI_TABLE = r"""\
+supplier_code: "mon_fournisseur_prestations"
+mapping_version: 1
+description: "Exemple multi_table — plusieurs tableaux indépendants dans le même onglet"
+upload_mode: "full"
+
+sheet_match: "Tarif 2026"
+header_detection:
+  mode: explicit
+  row: 8
+data_starts_row: 9
+
+extraction_mode: multi_table
+product_kind: "service"
+
+tables:
+  - name: "entretien_bases_vie"
+    description: "Forfait mensuel d'entretien selon taille de base et fréquence"
+    zone:
+      header_row: 7
+      data_rows: "8:17"
+      cols: "A:G"
+    layout: "matrix_2D"
+    col_dimensions:
+      - columns: ["B", "C"]
+        key: "frequency"
+        value: "1x_semaine"
+        price_col: "B"
+        max_time_col: "C"
+      - columns: ["D", "E"]
+        key: "frequency"
+        value: "2x_semaine"
+        price_col: "D"
+        max_time_col: "E"
+    product_template:
+      designation_template: "Entretien base vie {taille_base_vie} — {frequency}"
+      supplier_product_code_template: "PREST-EBV-{taille_base_vie_slug}-{frequency}"
+      family: "Entretien"
+      subfamily: "Bases de vie"
+    prices:
+      - type: "forfait"
+        source_col: "B"
+        transform: "parse_decimal_fr"
+        currency: "EUR"
+    attributes:
+      - key: "max_monthly_time"
+        source_col: "C"
+        data_type: "duration"
+        unit: "h"
+        transform: "parse_duration_fr"
+
+  - name: "fournitures_consommables"
+    description: "Forfait mensuel selon nombre de personnes"
+    zone:
+      header_row: 22
+      data_rows: "23:26"
+      cols: "A:B"
+    layout: "barème_1D"
+    product_template:
+      designation_template: "Fournitures consommables — {tranche_personnes}"
+      supplier_product_code_template: "PREST-FCS-{tranche_personnes_slug}"
+      family: "Consommables"
+      subfamily: "Sanitaires"
+    prices:
+      - type: "forfait"
+        source_col: "B"
+        transform: "parse_decimal_fr"
+        currency: "EUR"
+    attributes:
+      - key: "tranche_personnes"
+        source_col: "A"
+        data_type: "string"
+
+file_metadata:
+  validity_period:
+    regex: "Validité de l'offre\\s*:\\s*(\\d{2}/\\d{2}/\\d{4})\\s*au\\s*(\\d{2}/\\d{2}/\\d{4})"
+    in_cell: "C2"
+    captures:
+      validity_start: 1
+      validity_end: 2
+    transform: "parse_date_fr"
+
+gery_export:
+  enabled: false
+  blocked_reason: "Modélisation des prestations à valider avec le métier"
 """
 
 
@@ -127,22 +318,47 @@ def generate_yaml_from_excel(
     """
     preview = read_excel_preview(file_path)
 
-    prompt = f"""Tu es un expert en configuration de middleware ERP et en extraction de données Excel.
+    transforms_list = ", ".join(sorted(TRANSFORMS_VALIDES))
 
-Analyse la structure de ce fichier Excel fournisseur et génère un fichier YAML de configuration.
+    prompt = f"""
+Tu es un expert en configuration de middleware ERP et en extraction de données Excel.
 
-## Format YAML attendu (exemple complet) :
+Analyse ce fichier Excel fournisseur et génère un YAML de configuration.
+Ce YAML est validé par Pydantic : toute clé inconnue ou section incorrecte sera rejetée.
+Respecte EXACTEMENT la structure des exemples ci-dessous.
 
-{_EXAMPLE_YAML}
+## Étape 1 — Choisis l'extraction_mode (un seul parmi 3) :
+- "table"       : 1 produit par ligne, colonnes fixes. Sections requises : columns.
+- "matrix"      : prix variant selon 2 axes croisés (palier × variante/couleur).
+  Sections requises : data_zone, product_columns, price_matrix.
+  price_matrix contient : tier_axis, variant_axis, column_groups.
+  NE PAS utiliser la section "columns" en mode matrix.
+- "multi_table" : plusieurs tableaux dans le même onglet.
+  Section requise : tables (liste de sous-tableaux).
 
-## Règles importantes :
-- extraction_mode doit être "table" (1 produit par ligne, colonnes fixes)
-- Si le prix varie selon des paliers de quantité ET des variantes → "matrix"
-- Si plusieurs tableaux distincts dans le même onglet → "multi_table"
-- supplier_code : snake_case unique, ex: "atlantic_scga_eau", "airisol", "mon_fournisseur"
-- Les colonnes sont désignées par leur lettre (A, B, C...)
-- transform "parse_decimal_fr" pour les prix avec virgule décimale
-- transform "parse_date_iso" pour les dates au format YYYY-MM-DD ou JJ/MM/AAAA
+## EXEMPLE COMPLET — extraction_mode: table
+{_EXAMPLE_TABLE}
+
+## EXEMPLE COMPLET — extraction_mode: matrix
+{_EXAMPLE_MATRIX}
+
+## EXEMPLE COMPLET — extraction_mode: multi_table
+{_EXAMPLE_MULTI_TABLE}
+
+## Schéma — clés valides UNIQUEMENT (ne pas inventer d'autres clés) :
+- Haut niveau commun (tous modes) : supplier_code, mapping_version, description,
+  upload_mode, sharepoint_folder, sheet_match, header_detection, data_starts_row,
+  extraction_mode, product_kind, file_metadata, gery_export, row_filter
+- Mode table seulement : columns, prices, attributes
+- Mode matrix seulement : data_zone, product_columns, attributes, price_matrix,
+  commercial_rules
+  - price_matrix : tier_axis, variant_axis, column_groups, price_type, currency, transform
+  - Clés INTERDITES (n'existent pas) : matrix_prices, segments, price_configs, dimension
+- Mode multi_table seulement : tables (SubTable avec zone, layout, col_dimensions,
+  product_template, prices, attributes)
+- Valeurs transform autorisées UNIQUEMENT : {transforms_list}
+- ColumnMapping : exactement 1 source parmi source_col, constant, derived_from
+- gery_export.enabled = false → blocked_reason obligatoire
 
 ## Fichier à analyser :
 Nom : {filename}
