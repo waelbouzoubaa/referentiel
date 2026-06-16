@@ -80,6 +80,42 @@ def fetch_export_bytes(pending_id: str, filename: str) -> bytes:
     return resp.content
 
 
+def render_exports_view() -> None:
+    """Vue de consultation et téléchargement des exports Gery (tous fournisseurs)."""
+    st.subheader("📤 Exports Gery générés")
+    st.caption(
+        "Fichiers CSV produits automatiquement pour les fournisseurs connus "
+        "(à chaque modification, sans validation) ou après validation d'un nouveau fournisseur."
+    )
+    try:
+        resp = api_get("/api/v1/exports")
+        resp.raise_for_status()
+        exports = resp.json()
+    except Exception as exc:
+        st.error(f"Impossible de récupérer les exports : {exc}")
+        return
+    if not exports:
+        st.info("Aucun export généré pour le moment.")
+        return
+
+    h1, h2, h3, h4 = st.columns([4, 1, 2, 1])
+    h1.markdown("**Fichier**")
+    h2.markdown("**Lignes**")
+    h3.markdown("**Généré le**")
+    h4.markdown("**Télécharger**")
+    for e in exports:
+        c1, c2, c3, c4 = st.columns([4, 1, 2, 1])
+        c1.write(e["filename"])
+        c2.write(str(e["line_count"]))
+        c3.write(e["modified_at"][:19].replace("T", " "))
+        try:
+            data = api_get(f"/api/v1/exports/{e['filename']}/download").content
+            c4.download_button("⬇️", data=data, file_name=e["filename"],
+                               mime="text/csv", key=f"dlx_{e['filename']}")
+        except Exception:
+            c4.warning("indispo")
+
+
 # ─── Helpers YAML ───────────────────────────────────────────────────────────
 
 def load_yaml(text: str) -> dict[str, Any]:
@@ -1010,7 +1046,14 @@ FORM_RENDERERS = {
 
 # ─── Application ────────────────────────────────────────────────────────────
 
-st.title("Validation des mappings fournisseurs générés par IA")
+st.title("Middleware Ramery — Mappings & Exports")
+
+vue = st.sidebar.radio("Vue", ["Validation des mappings", "Exports Gery"])
+if vue == "Exports Gery":
+    render_exports_view()
+    st.stop()
+
+st.subheader("Validation des mappings fournisseurs générés par IA")
 
 if "last_action_html" in st.session_state:
     show_action_result(st.session_state.pop("last_action_html"))
