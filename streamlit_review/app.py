@@ -6,13 +6,17 @@ valider (génère les exports Gery) ou de rejeter la proposition.
 """
 from __future__ import annotations
 
+import base64
 import io
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
 import streamlit as st
 from ruamel.yaml import YAML
+
+_LOGO_PATH = Path(__file__).parent / "logo.png"
 
 API_URL = os.environ.get("MIDDLEWARE_API_URL", "http://api:8000")
 
@@ -34,15 +38,96 @@ st.set_page_config(page_title="Validation mappings fournisseurs", layout="wide")
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;800&display=swap');
-    h1, h2, h3, h4, .stTabs [data-baseweb="tab"] p {
+    @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&display=swap');
+
+    html, body, [class*="css"], .stMarkdown, p, label, span, div, button, input, textarea {
+        font-family: 'Lexend', sans-serif;
+    }
+    h1, h2, h3, h4, h5, h6, .stTabs [data-baseweb="tab"] p {
         font-family: 'Lexend', sans-serif !important;
         color: #003D7C;
+        font-weight: 600;
     }
+    body, .stMarkdown p, label { color: #4A4A49; }
+
+    /* En-tête sobre (filet bleu, pas d'aplat) */
+    .app-header {
+        display: flex; align-items: center; gap: 16px;
+        padding: 2px 0 14px; margin-bottom: 20px;
+        border-bottom: 2px solid #003D7C;
+    }
+    .app-header .wordmark {
+        font-size: 28px; font-weight: 700; color: #003D7C; letter-spacing: .5px;
+    }
+    .app-header .wordmark .dot { color: #D41317; }
+    .app-header .titles .t {
+        font-size: 15px; font-weight: 600; color: #003D7C; line-height: 1.2;
+    }
+    .app-header .titles .s { font-size: 12.5px; color: #4A4A49; }
+
+    /* Boutons : bleu Ramery, sobres */
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 6px; font-weight: 500;
+    }
+    .stButton > button[kind="primary"], .stDownloadButton > button {
+        background: #003D7C; color: #FFFFFF; border: 1px solid #003D7C;
+    }
+    .stButton > button[kind="primary"]:hover,
+    .stDownloadButton > button:hover { background: #002B58; border-color: #002B58; color: #FFFFFF; }
+
+    /* Badges de statut (teintes légères, pas d'aplats lourds) */
+    .badge { display: inline-block; padding: 2px 12px; border-radius: 999px;
+             font-size: 12px; font-weight: 600; border: 1px solid; }
+    .badge-ok   { color: #00695C; background: #E6F4F1; border-color: #009883; }
+    .badge-wait { color: #003D7C; background: #EAF1F8; border-color: #003D7C; }
+    .badge-ko   { color: #A30F12; background: #FDEAEA; border-color: #D41317; }
+
+    hr { border-color: #E3E8EE; }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+def _logo_data_uri() -> str:
+    try:
+        data = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+        return f"data:image/png;base64,{data}"
+    except Exception:
+        return ""
+
+
+def render_header() -> None:
+    """En-tête de marque sobre (charte Ramery) : logo + nom + titre applicatif."""
+    logo = _logo_data_uri()
+    logo_html = (
+        f'<img src="{logo}" alt="Ramery" style="height:44px;width:44px;'
+        f'border-radius:8px;object-fit:cover"/>' if logo else ""
+    )
+    st.markdown(
+        f"""
+        <div class="app-header">
+          {logo_html}
+          <span class="wordmark">Ramery</span>
+          <div class="titles">
+            <div class="t">Référentiel fournisseurs</div>
+            <div class="s">Normalisation des catalogues &rarr; export Gery</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def status_badge(status: str) -> str:
+    """Retourne le HTML d'un badge de statut coloré (charte Ramery)."""
+    mapping = {
+        "approved": ("badge-ok", "validé"),
+        "pending": ("badge-wait", "en attente"),
+        "rejected": ("badge-ko", "rejeté"),
+    }
+    cls, label = mapping.get(status, ("badge-wait", status))
+    return f'<span class="badge {cls}">{label}</span>'
 
 
 # ─── Helpers API ────────────────────────────────────────────────────────────
@@ -1046,7 +1131,7 @@ FORM_RENDERERS = {
 
 # ─── Application ────────────────────────────────────────────────────────────
 
-st.title("Middleware Ramery — Mappings & Exports")
+render_header()
 
 vue = st.sidebar.radio("Vue", ["Validation des mappings", "Exports Gery"])
 if vue == "Exports Gery":
@@ -1090,7 +1175,11 @@ st.subheader(meta["filename"])
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Fournisseur deviné", meta["supplier_guess"])
 c2.metric("Dossier SharePoint", meta["folder_name"])
-c3.metric("Statut", meta["status"])
+c3.markdown(
+    f'<div style="font-size:13px;color:#4A4A49;margin-bottom:6px">Statut</div>'
+    f'{status_badge(meta["status"])}',
+    unsafe_allow_html=True,
+)
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 
 preview_text = fetch_preview(pending_id)
