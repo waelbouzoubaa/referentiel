@@ -382,4 +382,37 @@ Génère UNIQUEMENT le YAML de configuration, sans explications, sans balises ma
         filename=filename,
         yaml_length=len(yaml_text),
     )
-    return supplier_code, yaml_text
+    return supplier_code, yaml_text, prompt
+
+
+def edit_yaml_with_ai(current_yaml: str, instruction: str, preview: str = "") -> str:
+    """Modifie un YAML de mapping selon une instruction en langage naturel (Gemini).
+
+    Renvoie le YAML complet mis à jour (nettoyé). La validation Pydantic est faite
+    par l'appelant.
+    """
+    transforms_list = ", ".join(sorted(TRANSFORMS_VALIDES))
+    prompt = f"""Tu es un expert en mapping YAML (Excel → ERP Gery) pour ce middleware.
+
+Voici le YAML de mapping ACTUEL :
+```yaml
+{current_yaml}
+```
+
+Aperçu du fichier Excel source (Ligne N: colA<TAB>colB...) :
+{preview}
+
+Demande de l'utilisateur :
+{instruction}
+
+Applique cette demande en modifiant le YAML. Contraintes :
+- Garde la même grammaire (ne change pas extraction_mode sauf si demandé, n'invente pas de clés).
+- transforms autorisés uniquement : {transforms_list}
+- Dates JJ/MM/AAAA → parse_date_fr ; dates AAAA-MM-JJ → parse_date_iso.
+
+Réponds UNIQUEMENT avec le YAML complet mis à jour, sans explication ni balises markdown."""
+
+    raw = _call_gemini(prompt)
+    updated = _clean_yaml_output(raw)
+    logger.info("yaml modifié par IA", instruction=instruction[:120], yaml_length=len(updated))
+    return updated

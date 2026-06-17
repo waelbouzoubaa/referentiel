@@ -1224,8 +1224,8 @@ yaml_key = f"yaml_text_{pending_id}"
 if yaml_key not in st.session_state:
     st.session_state[yaml_key] = meta["yaml_proposed"]
 
-tab_yaml, tab_form, tab_preview = st.tabs(
-    ["YAML", "Formulaire simplifié", "Aperçu export Gery"]
+tab_yaml, tab_form, tab_preview, tab_ai = st.tabs(
+    ["YAML", "Formulaire simplifié", "Aperçu export Gery", "🤖 Assistant IA"]
 )
 
 with tab_yaml:
@@ -1299,6 +1299,54 @@ with tab_preview:
                 st.write(f"- {err}")
         else:
             st.error(f"Erreur {resp.status_code} : {resp.text}")
+
+with tab_ai:
+    st.caption(
+        "Demande à l'IA de modifier le mapping en langage naturel. Ses changements "
+        "s'appliquent au YAML — donc au formulaire et à l'aperçu."
+    )
+    with st.expander("📩 Prompt initial envoyé à l'IA"):
+        st.code(meta.get("initial_prompt") or "(non disponible)", language=None)
+
+    chat_key = f"chat_{pending_id}"
+    if chat_key not in st.session_state:
+        st.session_state[chat_key] = []
+    for role, content in st.session_state[chat_key]:
+        with st.chat_message(role):
+            st.markdown(content)
+
+    instruction = st.text_input(
+        "Ta demande (ex. « mets les dates en E4/J4 format FR », « le prix est en colonne G »)",
+        key=f"ai_instr_{pending_id}",
+    )
+    if st.button("Envoyer à l'IA", key=f"ai_send_{pending_id}") and instruction.strip():
+        st.session_state[chat_key].append(("user", instruction.strip()))
+        with st.spinner("L'IA met à jour le YAML…"):
+            resp = api_post(
+                f"/api/v1/review/{pending_id}/ai-edit",
+                {"yaml_content": st.session_state[yaml_key], "instruction": instruction.strip()},
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            st.session_state[yaml_key] = data["yaml"]
+            if data["valid"]:
+                st.session_state[chat_key].append((
+                    "assistant",
+                    "✅ YAML mis à jour. Vérifie les onglets **YAML**, **Formulaire** "
+                    "et **Aperçu export Gery**.",
+                ))
+            else:
+                errs = "\n".join(f"- {e}" for e in data["errors"])
+                st.session_state[chat_key].append((
+                    "assistant",
+                    f"⚠️ YAML modifié mais **invalide** :\n{errs}\n\nRedemande-moi une correction.",
+                ))
+            st.rerun()
+        else:
+            st.session_state[chat_key].append(
+                ("assistant", f"Erreur {resp.status_code} : {resp.text[:200]}")
+            )
+            st.rerun()
 
 st.divider()
 

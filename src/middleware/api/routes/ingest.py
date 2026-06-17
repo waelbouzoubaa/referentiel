@@ -78,8 +78,9 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
 
     pending_id = request.pending_id or uuid.uuid4().hex
 
+    initial_prompt = ""
     try:
-        supplier_guess, yaml_proposed = generate_yaml_from_excel(
+        supplier_guess, yaml_proposed, initial_prompt = generate_yaml_from_excel(
             file_path=file_path,
             folder_name=request.folder_name,
             filename=request.filename,
@@ -88,6 +89,7 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
         logger.error("génération YAML IA échouée", erreur=str(exc))
         supplier_guess = request.folder_name.lower().replace(" ", "_")
         yaml_proposed = f"# Génération automatique échouée : {exc}\n# Complétez ce YAML manuellement.\nsupplier_code: \"{supplier_guess}\"\n"
+        initial_prompt = f"(génération échouée : {exc})"
 
     # Stocker les métadonnées
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
@@ -99,6 +101,7 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
         "file_path": request.file_path,
         "supplier_guess": supplier_guess,
         "yaml_proposed": yaml_proposed,
+        "initial_prompt": initial_prompt,
         "status": "pending",
     }
     (PENDING_DIR / f"{pending_id}.json").write_text(

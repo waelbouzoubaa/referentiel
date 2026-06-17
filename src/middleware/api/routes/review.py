@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from middleware.ai.yaml_generator import read_excel_preview
+from middleware.ai.yaml_generator import edit_yaml_with_ai, read_excel_preview
 from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
@@ -155,6 +155,35 @@ def export_preview(pending_id: str, request: ExportPreviewRequest) -> dict:
         "line_count": len(rows),
         "products_parsed": len(result.products),
         "export_enabled": rule.gery_export.enabled,
+    }
+
+
+class AiEditRequest(BaseModel):
+    yaml_content: str
+    instruction: str
+
+
+@router.post("/review/{pending_id}/ai-edit", tags=["validation"])
+def ai_edit(pending_id: str, request: AiEditRequest) -> dict:
+    """Modifie le YAML via une instruction en langage naturel (assistant IA).
+
+    Renvoie le YAML mis à jour + son statut de validation (sans rien enregistrer ;
+    c'est l'interface qui décide d'appliquer/sauver).
+    """
+    meta = _load_pending(pending_id)
+    file_path = Path(meta.get("file_path", ""))
+    preview = read_excel_preview(file_path) if file_path.exists() else ""
+
+    try:
+        new_yaml = edit_yaml_with_ai(request.yaml_content, request.instruction, preview)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Erreur de l'assistant IA : {exc}") from exc
+
+    rule, erreurs = validate_mapping_yaml(new_yaml)
+    return {
+        "yaml": new_yaml,
+        "valid": bool(rule is not None and not erreurs),
+        "errors": erreurs or [],
     }
 
 
