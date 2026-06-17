@@ -9,10 +9,13 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.ai.yaml_generator import read_excel_preview
+from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
+from middleware.delta.engine import compute_delta
+from middleware.exporter.gery import NEW_ARTICLE_COLS, build_new_article_rows
 from middleware.parser.yaml_loader import validate_mapping_yaml
-from middleware.pipeline import process_and_export
+from middleware.pipeline import parse_with_rule, process_and_export
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -110,6 +113,49 @@ def get_pending_preview(pending_id: str) -> dict:
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier source introuvable : {file_path}")
     return {"preview": read_excel_preview(file_path)}
+
+
+class ExportPreviewRequest(BaseModel):
+    yaml_content: str
+
+
+@router.post("/review/{pending_id}/export-preview", tags=["validation"])
+def export_preview(pending_id: str, request: ExportPreviewRequest) -> dict:
+    """Aperçu (dry-run) des lignes NEW_ARTICLE qui seraient générées pour Gery.
+
+    Parse le fichier source avec le YAML fourni et construit les lignes en mémoire,
+    sans rien persister ni écrire. Permet de relire le résultat avant de valider.
+    """
+    meta = _load_pending(pending_id)
+
+    rule, erreurs = validate_mapping_yaml(request.yaml_content)
+    if erreurs or rule is None:
+        raise HTTPException(status_code=422, detail=erreurs or ["YAML invalide."])
+
+    file_path = Path(meta.get("file_path", ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Fichier source introuvable.")
+
+    try:
+        result = parse_with_rule(file_path, rule)
+    except ParsingError as exc:
+        raise HTTPException(status_code=422, detail=[str(exc)]) from exc
+
+    # Delta "première ingestion" (tout en CREATE) → aperçu de ce qui sortirait
+    delta = compute_delta(result.products, known_hashes={})
+    rows = build_new_article_rows(
+        delta,
+        rule.gery_export,
+        result.file_metadata.validity_start,
+        result.file_metadata.validity_end,
+    )
+    return {
+        "columns": NEW_ARTICLE_COLS,
+        "rows": rows,
+        "line_count": len(rows),
+        "products_parsed": len(result.products),
+        "export_enabled": rule.gery_export.enabled,
+    }
 
 
 @router.get("/review/{pending_id}/approve", response_class=HTMLResponse, tags=["validation"])

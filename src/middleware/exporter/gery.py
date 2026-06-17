@@ -109,6 +109,30 @@ def generate_gery_exports(
     return result
 
 
+def build_new_article_rows(
+    delta: DeltaResult,
+    export_config: GeryExportConfig,
+    validity_start: date | None = None,
+    validity_end: date | None = None,
+) -> list[dict[str, Any]]:
+    """Construit les lignes NEW_ARTICLE en mémoire (ni fichier ni persistance).
+
+    Sert à l'aperçu de l'export dans l'interface de validation : on voit ce qui
+    sortirait pour Gery sans rien enregistrer.
+    """
+    if not export_config.enabled:
+        return []
+    rows, _ = _build_rows(
+        delta.creates + delta.reactivates + delta.updates + delta.price_changes,
+        export_config.defaults,
+        export_config.price_export_mapping.direct_unit_cost,
+        export_config.derived_code_template,
+        validity_start,
+        validity_end,
+    )
+    return rows
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Construction des lignes
 # ─────────────────────────────────────────────────────────────────────────────

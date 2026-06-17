@@ -140,6 +140,10 @@ def api_put(path: str, json_body: dict[str, Any]) -> httpx.Response:
     return httpx.put(f"{API_URL}{path}", json=json_body, timeout=30)
 
 
+def api_post(path: str, json_body: dict[str, Any]) -> httpx.Response:
+    return httpx.post(f"{API_URL}{path}", json=json_body, timeout=60)
+
+
 def fetch_pending_list() -> list[dict[str, Any]]:
     resp = api_get("/api/v1/review/pending")
     resp.raise_for_status()
@@ -1204,7 +1208,9 @@ yaml_key = f"yaml_text_{pending_id}"
 if yaml_key not in st.session_state:
     st.session_state[yaml_key] = meta["yaml_proposed"]
 
-tab_yaml, tab_form = st.tabs(["YAML", "Formulaire simplifié"])
+tab_yaml, tab_form, tab_preview = st.tabs(
+    ["YAML", "Formulaire simplifié", "Aperçu export Gery"]
+)
 
 with tab_yaml:
     st.text_area("Mapping YAML", key=yaml_key, height=500)
@@ -1245,6 +1251,38 @@ with tab_form:
                     st.write(f"- {err}")
             else:
                 st.error(f"Erreur {resp.status_code} : {resp.text}")
+
+with tab_preview:
+    st.caption(
+        "Aperçu des lignes qui seraient générées pour Gery à partir du mapping "
+        "ci-dessus — sans rien enregistrer."
+    )
+    if st.button("🔍 Calculer l'aperçu", key=f"preview_btn_{pending_id}"):
+        resp = api_post(
+            f"/api/v1/review/{pending_id}/export-preview",
+            {"yaml_content": st.session_state[yaml_key]},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if not data["export_enabled"]:
+                st.info("Export Gery désactivé pour ce fournisseur — aucune ligne générée.")
+            elif data["line_count"] == 0:
+                st.warning(
+                    f"{data['products_parsed']} produit(s) lus, mais 0 ligne d'export. "
+                    "Vérifie le mapping (colonnes / type de prix)."
+                )
+            else:
+                st.success(
+                    f"{data['line_count']} ligne(s) générée(s) à partir de "
+                    f"{data['products_parsed']} produit(s) lus."
+                )
+                st.dataframe(data["rows"], use_container_width=True, hide_index=True)
+        elif resp.status_code == 422:
+            st.error("Impossible de générer l'aperçu :")
+            for err in resp.json().get("detail", []):
+                st.write(f"- {err}")
+        else:
+            st.error(f"Erreur {resp.status_code} : {resp.text}")
 
 st.divider()
 
