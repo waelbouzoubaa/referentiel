@@ -34,12 +34,47 @@ class UnknownIngestResponse(BaseModel):
     message: str
 
 
+def _find_pending_for_file(folder_name: str, filename: str) -> dict | None:
+    """Retourne une demande déjà 'pending' pour ce (dossier, fichier), sinon None."""
+    if not PENDING_DIR.exists():
+        return None
+    for meta_path in PENDING_DIR.glob("*.json"):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (
+            data.get("status") == "pending"
+            and data.get("folder_name") == folder_name
+            and data.get("filename") == filename
+        ):
+            return data
+    return None
+
+
 @router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])
 def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
     """Reçoit un fichier de fournisseur inconnu, génère un YAML via IA et notifie pour validation."""
     file_path = Path(request.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
+
+    # Dédup : une demande est déjà en attente pour ce fichier → pas de doublon
+    # (le watcher peut ré-émettre le même fichier à chaque scan tant qu'il est inconnu).
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    existing = _find_pending_for_file(request.folder_name, request.filename)
+    if existing is not None:
+        file_path.unlink(missing_ok=True)  # supprime la copie téléchargée (doublon)
+        logger.info(
+            "doublon évité — demande déjà en attente",
+            pending_id=existing["id"],
+            filename=request.filename,
+        )
+        return UnknownIngestResponse(
+            pending_id=existing["id"],
+            supplier_guess=existing.get("supplier_guess", ""),
+            message="Une demande est déjà en attente de validation pour ce fichier.",
+        )
 
     pending_id = request.pending_id or uuid.uuid4().hex
 
