@@ -4,7 +4,7 @@ description: "Airisol — étanchéité, matrice de prix multi-paliers / multi-v
 upload_mode: "full"
 sharepoint_folder: "airisol"
 
-sheet_match: "Table 1"
+sheet_match: "auto"
 header_detection:
   mode: explicit
   row: 9

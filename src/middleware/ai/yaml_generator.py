@@ -17,7 +17,7 @@ mapping_version: 1
 description: "Fournisseur X — gamme produits Y"
 upload_mode: "full"
 
-sheet_match: "Tarif 2026"
+sheet_match: "auto"
 header_detection:
   mode: explicit
   row: 9
@@ -72,7 +72,7 @@ mapping_version: 1
 description: "Exemple matrix — grille de prix multi-paliers et multi-variantes"
 upload_mode: "full"
 
-sheet_match: "Tarif 2026"
+sheet_match: "auto"
 header_detection:
   mode: explicit
   row: 9
@@ -174,7 +174,7 @@ mapping_version: 1
 description: "Exemple multi_table — plusieurs tableaux indépendants dans le même onglet"
 upload_mode: "full"
 
-sheet_match: "Tarif 2026"
+sheet_match: "auto"
 header_detection:
   mode: explicit
   row: 8
@@ -357,6 +357,9 @@ Respecte EXACTEMENT la structure des exemples ci-dessous.
 - Mode multi_table seulement : tables (SubTable avec zone, layout, col_dimensions,
   product_template, prices, attributes)
 - Valeurs transform autorisées UNIQUEMENT : {transforms_list}
+- sheet_match : mets "auto" par défaut (le moteur choisit l'onglet le plus rempli).
+  N'indique un nom exact QUE si tu es certain du libellé de l'onglet.
+- product_kind : "physical" (défaut) ou "service" UNIQUEMENT — aucune autre valeur.
 - ColumnMapping : exactement 1 source parmi source_col, constant, derived_from
 - gery_export.enabled = false → blocked_reason obligatoire
 

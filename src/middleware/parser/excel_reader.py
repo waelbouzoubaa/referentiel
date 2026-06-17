@@ -47,9 +47,14 @@ def _read_with_calamine(path: Path, sheet_name: str | None) -> dict[str, Sheet]:
     from python_calamine import CalamineWorkbook
 
     wb = CalamineWorkbook.from_path(str(path))
+    names = wb.sheet_names
+    # Onglet demandé absent → on charge tout : find_sheet pourra matcher
+    # (casse / auto) et surtout lister les vrais onglets en cas d'échec.
+    if sheet_name is not None and sheet_name not in names:
+        sheet_name = None
     sheets = {}
-    for name in wb.sheet_names:
-        if sheet_name and name != sheet_name:
+    for name in names:
+        if sheet_name is not None and name != sheet_name:
             continue
         sheet = wb.get_sheet_by_name(name)
         sheets[name] = [list(row) for row in sheet.to_python(skip_empty_area=False)]
@@ -61,9 +66,12 @@ def _read_with_openpyxl(path: Path, sheet_name: str | None) -> dict[str, Sheet]:
     import openpyxl
 
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    names = wb.sheetnames
+    if sheet_name is not None and sheet_name not in names:
+        sheet_name = None
     sheets = {}
-    for name in wb.sheetnames:
-        if sheet_name and name != sheet_name:
+    for name in names:
+        if sheet_name is not None and name != sheet_name:
             continue
         ws = wb[name]
         rows: Sheet = []

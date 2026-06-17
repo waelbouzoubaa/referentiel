@@ -13,6 +13,7 @@ from middleware.api.schemas import (
     ProcessFileRequest,
     ProcessFileResponse,
 )
+from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
 from middleware.delta.engine import compute_delta
@@ -97,14 +98,17 @@ async def generate_gery_exports_endpoint(
     rule = _load_rule(request.supplier_code)
 
     # Parse + archivage MinIO + delta vs PostgreSQL + persistance + export (service partagé)
-    _, _, export_result = await process_and_export(
-        session,
-        rule,
-        path,
-        Path(request.output_dir),
-        original_filename=request.original_filename,
-        sharepoint_item_id=request.sharepoint_item_id,
-    )
+    try:
+        _, _, export_result = await process_and_export(
+            session,
+            rule,
+            path,
+            Path(request.output_dir),
+            original_filename=request.original_filename,
+            sharepoint_item_id=request.sharepoint_item_id,
+        )
+    except ParsingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return GenerateExportsResponse(
         supplier_code=request.supplier_code,
@@ -143,5 +147,5 @@ def _parse_with_rule(path: Path, rule: MappingRule):
     """Dispatch vers le bon parseur (cf. pipeline.parse_with_rule), erreurs en 422."""
     try:
         return parse_with_rule(path, rule)
-    except ValueError as exc:
+    except (ValueError, ParsingError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
