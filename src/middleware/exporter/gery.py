@@ -95,7 +95,10 @@ def generate_gery_exports(
     )
 
     if rows:
-        path = output_dir / f"NEW_ARTICLE_{supplier_code}.csv"
+        # Nom horodaté : on conserve l'historique des exports (chaque génération
+        # crée un fichier distinct au lieu d'écraser le précédent).
+        ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        path = output_dir / f"NEW_ARTICLE_{supplier_code}_{ts}.csv"
         _write_csv(path, NEW_ARTICLE_COLS, rows)
         result.files.append(GeneratedFile(
             kind="NEW_ARTICLE",
