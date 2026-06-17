@@ -256,6 +256,22 @@ def show_action_result(html: str) -> None:
     components.html(html, height=180, scrolling=False)
 
 
+def date_transform_selector(pending_id: str, current: str | None, suffix: str = "") -> str:
+    """Sélecteur du format des dates de validité → renvoie le transform à utiliser."""
+    options = {"Français — JJ/MM/AAAA": "parse_date_fr", "ISO — AAAA-MM-JJ": "parse_date_iso"}
+    labels = list(options)
+    cur = current or "parse_date_fr"
+    default_label = next((lbl for lbl, val in options.items() if val == cur), labels[0])
+    chosen = st.selectbox(
+        "Format des dates de validité",
+        labels,
+        index=labels.index(default_label),
+        key=f"datefmt_{pending_id}_{suffix}",
+        help="JJ/MM/AAAA pour des dates type 01/02/2024 ; ISO pour 2024-02-01.",
+    )
+    return options[chosen]
+
+
 # ─── Formulaire simplifié (mode table) ─────────────────────────────────────
 
 def render_table_form(
@@ -413,6 +429,9 @@ def render_table_form(
         "Cellule date de fin de validité", value=ve.get("cell", "") or "",
         key=f"ve_cell_{pending_id}",
     )
+    date_tr = date_transform_selector(
+        pending_id, vs.get("transform") or ve.get("transform"), suffix="table"
+    )
 
     st.markdown("##### Export Gery")
     gery_export = data.get("gery_export") or {}
@@ -525,15 +544,11 @@ def render_table_form(
 
     new_file_metadata = dict(file_metadata)
     if vs_cell.strip():
-        new_file_metadata["validity_start"] = {
-            **vs, "cell": vs_cell.strip(), "transform": vs.get("transform", "parse_date_iso"),
-        }
+        new_file_metadata["validity_start"] = {"cell": vs_cell.strip(), "transform": date_tr}
     else:
         new_file_metadata.pop("validity_start", None)
     if ve_cell.strip():
-        new_file_metadata["validity_end"] = {
-            **ve, "cell": ve_cell.strip(), "transform": ve.get("transform", "parse_date_iso"),
-        }
+        new_file_metadata["validity_end"] = {"cell": ve_cell.strip(), "transform": date_tr}
     else:
         new_file_metadata.pop("validity_end", None)
 
@@ -722,15 +737,16 @@ def _render_file_metadata(data: dict[str, Any], pending_id: str) -> dict[str, An
                             key=f"vs_{pending_id}")
     ve_cell = c2.text_input("Cellule fin de validité", value=ve.get("cell", "") or "",
                             key=f"ve_{pending_id}")
+    date_tr = date_transform_selector(
+        pending_id, vs.get("transform") or ve.get("transform"), suffix="meta"
+    )
     new_fm = dict(fm)
     if vs_cell.strip():
-        new_fm["validity_start"] = {**vs, "cell": vs_cell.strip(),
-                                    "transform": vs.get("transform", "parse_date_iso")}
+        new_fm["validity_start"] = {"cell": vs_cell.strip(), "transform": date_tr}
     else:
         new_fm.pop("validity_start", None)
     if ve_cell.strip():
-        new_fm["validity_end"] = {**ve, "cell": ve_cell.strip(),
-                                  "transform": ve.get("transform", "parse_date_iso")}
+        new_fm["validity_end"] = {"cell": ve_cell.strip(), "transform": date_tr}
     else:
         new_fm.pop("validity_end", None)
     return new_fm
