@@ -223,6 +223,7 @@ def _handle_unknown_supplier(item):
                 "folder_name": folder,
                 "file_path": str(file_path),
                 "pending_id": pending_id,
+                "web_url": item.get("webUrl"),
             },
             timeout=120,
         )

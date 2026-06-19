@@ -1260,18 +1260,12 @@ col_edit, col_preview = st.columns([3, 2])
 with col_preview:
     st.markdown("##### 📄 Aperçu du fichier")
     render_excel_grid(preview_text)
-    try:
-        src = api_get(f"/api/v1/review/{pending_id}/source-file")
-        if src.status_code == 200:
-            st.download_button(
-                "📂 Ouvrir / télécharger le fichier Excel",
-                data=src.content,
-                file_name=meta["filename"],
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"src_{pending_id}",
-            )
-    except Exception:
-        pass
+    web_url = meta.get("web_url")
+    if web_url:
+        st.link_button("📂 Ouvrir le fichier dans SharePoint", web_url, use_container_width=True)
+    else:
+        st.caption("Le lien d'ouverture SharePoint apparaît pour les fichiers détectés "
+                   "par le watcher (nouvelles demandes).")
 
 with col_edit:
     tab_yaml, tab_form, tab_preview, tab_ai = st.tabs(

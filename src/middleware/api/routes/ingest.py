@@ -26,6 +26,7 @@ class UnknownIngestRequest(BaseModel):
     folder_name: str
     file_path: str
     pending_id: str | None = None
+    web_url: str | None = None  # lien SharePoint pour ouvrir le fichier en 1 clic
 
 
 class UnknownIngestResponse(BaseModel):
@@ -102,6 +103,7 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
         "supplier_guess": supplier_guess,
         "yaml_proposed": yaml_proposed,
         "initial_prompt": initial_prompt,
+        "web_url": request.web_url,
         "status": "pending",
     }
     (PENDING_DIR / f"{pending_id}.json").write_text(
