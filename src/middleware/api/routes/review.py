@@ -16,6 +16,7 @@ from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import NEW_ARTICLE_COLS, build_new_article_rows
 from middleware.parser.yaml_loader import validate_mapping_yaml
 from middleware.pipeline import parse_with_rule, process_and_export
+from middleware.sage_codes import resolve_sage_code
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -148,6 +149,7 @@ def export_preview(pending_id: str, request: ExportPreviewRequest) -> dict:
         rule.gery_export,
         result.file_metadata.validity_start,
         result.file_metadata.validity_end,
+        resolve_sage_code(rule.supplier_code),
     )
     return {
         "columns": NEW_ARTICLE_COLS,

@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     sharepoint_host: str = ""
     sharepoint_site_path: str = "/"
 
+    # ── Codes fournisseurs SAGE (placeholder, source remplaçable) ───────────────
+    # backend = "file" (placeholder CSV) aujourd'hui ; demain "http"/"db"/… cloud,
+    # ajouté derrière la même interface resolve_sage_code() sans toucher au reste.
+    sage_backend: str = "file"
+    sage_mapping_file: str = "config/sage_codes.csv"
+
 
 @lru_cache
 def get_settings() -> Settings:

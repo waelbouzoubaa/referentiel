@@ -27,6 +27,7 @@ from middleware.parser.matrix_extractor import parse_matrix_file
 from middleware.parser.multi_table_extractor import parse_multi_table_file
 from middleware.parser.pivot import ParsingResult
 from middleware.parser.table_extractor import parse_table_file
+from middleware.sage_codes import resolve_sage_code
 
 logger = get_logger(__name__)
 
@@ -91,6 +92,7 @@ async def process_and_export(
         output_dir=output_dir,
         validity_start=result.file_metadata.validity_start,
         validity_end=result.file_metadata.validity_end,
+        code_fournisseur_sage=resolve_sage_code(rule.supplier_code),
     )
 
     await persist_gery_export(session, export_result, supplier.id, supplier_file.id)
