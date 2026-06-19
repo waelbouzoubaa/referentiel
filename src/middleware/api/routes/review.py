@@ -116,6 +116,20 @@ def get_pending_preview(pending_id: str) -> dict:
     return {"preview": read_excel_preview(file_path)}
 
 
+@router.get("/review/{pending_id}/source-file", tags=["validation"])
+def get_source_file(pending_id: str) -> FileResponse:
+    """Télécharge le fichier Excel source d'une demande (pour l'ouvrir en 1 clic)."""
+    meta = _load_pending(pending_id)
+    file_path = Path(meta.get("file_path", ""))
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Fichier source introuvable.")
+    return FileResponse(
+        file_path,
+        filename=meta.get("filename") or file_path.name,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 class ExportPreviewRequest(BaseModel):
     yaml_content: str
 

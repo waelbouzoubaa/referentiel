@@ -644,6 +644,38 @@ def render_columns_reference(columns: list[tuple[str, str]] | None) -> None:
         )
 
 
+def render_excel_grid(preview_text: str) -> None:
+    """Affiche l'aperçu Excel comme une vraie grille : colonnes A,B,C… + n° de lignes.
+
+    Permet à l'utilisateur de repérer une info par sa position (« ligne 6, colonne D »).
+    """
+    import pandas as pd
+
+    parsed: list[tuple[int, list[str]]] = []
+    for line in preview_text.splitlines():
+        if not line.startswith("Ligne "):
+            continue
+        prefix, sep, rest = line.partition(": ")
+        if not sep:
+            continue
+        try:
+            row_num = int(prefix.replace("Ligne", "").strip())
+        except ValueError:
+            continue
+        parsed.append((row_num, rest.split("\t")))
+
+    if not parsed:
+        st.info("Aperçu indisponible.")
+        return
+
+    max_cols = max(len(cells) for _, cells in parsed)
+    col_letters = [_col_letter(i) for i in range(max_cols)]
+    records = [cells + [""] * (max_cols - len(cells)) for _, cells in parsed]
+    index = [row_num for row_num, _ in parsed]
+    df = pd.DataFrame(records, columns=col_letters, index=index)
+    st.dataframe(df, use_container_width=True, height=460)
+
+
 # ─── Blocs de formulaire partagés (tous modes) ─────────────────────────────
 
 def _render_general_info(data: dict[str, Any], pending_id: str) -> dict[str, Any]:
@@ -1217,16 +1249,34 @@ c3.markdown(
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 
 preview_text = fetch_preview(pending_id)
-with st.expander("Aperçu du fichier Excel"):
-    st.code(preview_text, language=None)
 
 yaml_key = f"yaml_text_{pending_id}"
 if yaml_key not in st.session_state:
     st.session_state[yaml_key] = meta["yaml_proposed"]
 
-tab_yaml, tab_form, tab_preview, tab_ai = st.tabs(
-    ["YAML", "Formulaire simplifié", "Aperçu export Gery", "🤖 Assistant IA"]
-)
+# Écran partagé : édition à gauche, aperçu Excel (grille A,B,C + lignes) à droite.
+col_edit, col_preview = st.columns([3, 2])
+
+with col_preview:
+    st.markdown("##### 📄 Aperçu du fichier")
+    render_excel_grid(preview_text)
+    try:
+        src = api_get(f"/api/v1/review/{pending_id}/source-file")
+        if src.status_code == 200:
+            st.download_button(
+                "📂 Ouvrir / télécharger le fichier Excel",
+                data=src.content,
+                file_name=meta["filename"],
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"src_{pending_id}",
+            )
+    except Exception:
+        pass
+
+with col_edit:
+    tab_yaml, tab_form, tab_preview, tab_ai = st.tabs(
+        ["YAML", "Formulaire simplifié", "Aperçu export Gery", "🤖 Assistant IA"]
+    )
 
 with tab_yaml:
     st.text_area("Mapping YAML", key=yaml_key, height=500)
