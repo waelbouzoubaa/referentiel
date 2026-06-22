@@ -169,6 +169,33 @@ def fetch_export_bytes(pending_id: str, filename: str) -> bytes:
     return resp.content
 
 
+_DOCS_DIR = Path("/app/docs")
+_GITHUB_DOCS = "https://github.com/waelbouzoubaa/referentiel/blob/main/docs"
+
+
+def render_help_view() -> None:
+    """Vue d'aide : affiche les guides (création de YAML + runbook) dans l'app."""
+    st.subheader("❓ Aide")
+    st.caption("Guides pour créer les mappings et opérer le système.")
+    tab_guide, tab_runbook = st.tabs(
+        ["📝 Créer un YAML (table simple)", "🛠️ Runbook (opérer / dépanner)"]
+    )
+    with tab_guide:
+        doc = _DOCS_DIR / "GUIDE_YAML_TABLE.md"
+        if doc.exists():
+            st.markdown(doc.read_text(encoding="utf-8"))
+        else:
+            st.info("Guide non monté dans le conteneur.")
+            st.link_button("Ouvrir le guide sur GitHub", f"{_GITHUB_DOCS}/GUIDE_YAML_TABLE.md")
+    with tab_runbook:
+        doc = _DOCS_DIR / "RUNBOOK.md"
+        if doc.exists():
+            st.markdown(doc.read_text(encoding="utf-8"))
+        else:
+            st.info("Runbook non monté dans le conteneur.")
+            st.link_button("Ouvrir le runbook sur GitHub", f"{_GITHUB_DOCS}/RUNBOOK.md")
+
+
 def render_exports_view() -> None:
     """Vue de consultation et téléchargement des exports Gery (tous fournisseurs)."""
     st.subheader("📤 Exports Gery générés")
@@ -1185,9 +1212,12 @@ FORM_RENDERERS = {
 
 render_header()
 
-vue = st.sidebar.radio("Vue", ["Validation des mappings", "Exports Gery"])
+vue = st.sidebar.radio("Vue", ["Validation des mappings", "Exports Gery", "❓ Aide"])
 if vue == "Exports Gery":
     render_exports_view()
+    st.stop()
+if vue == "❓ Aide":
+    render_help_view()
     st.stop()
 
 st.subheader("Validation des mappings fournisseurs générés par IA")
