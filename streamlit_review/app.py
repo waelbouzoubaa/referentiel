@@ -144,79 +144,6 @@ def api_post(path: str, json_body: dict[str, Any]) -> httpx.Response:
     return httpx.post(f"{API_URL}{path}", json=json_body, timeout=60)
 
 
-def render_diagnostic(resp: dict[str, Any]) -> None:
-    """Affiche le rapport combiné : moteur Python + juge IA."""
-    # Gère l'ancien format (diagnostic Python seul) et le nouveau (python + ai)
-    if "python" in resp:
-        python_diag = resp["python"]
-        ai_diag = resp.get("ai", {})
-    else:
-        python_diag = resp
-        ai_diag = {}
-
-    if not python_diag.get("yaml_valid"):
-        st.error("YAML structurellement invalide :")
-        for e in python_diag.get("errors", []):
-            st.write(f"- {e}")
-        return
-
-    if not python_diag.get("parse_ok"):
-        st.error(f"Parsing échoué : {python_diag.get('fatal', 'erreur inconnue')}")
-        if ai_diag.get("issues"):
-            for issue in ai_diag["issues"]:
-                st.warning(issue)
-        return
-
-    # ── Verdict IA ──────────────────────────────────────────────────────────
-    if ai_diag:
-        confidence = ai_diag.get("confidence", 0)
-        verdict = ai_diag.get("verdict", "à revoir")
-        verdict_color = "#00695C" if confidence >= 85 else ("#E65100" if confidence >= 60 else "#B71C1C")
-        verdict_icon = "✅" if confidence >= 85 else ("⚠️" if confidence >= 60 else "🔴")
-
-        st.markdown(
-            f'<div style="padding:12px;border-radius:8px;border:1px solid {verdict_color};margin-bottom:8px">'
-            f'<span style="font-size:18px;font-weight:700;color:{verdict_color}">'
-            f'{verdict_icon} {verdict.upper()} — Confiance : {confidence}%</span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-        st.progress(confidence / 100)
-        if ai_diag.get("resume"):
-            st.caption(ai_diag["resume"])
-
-    # ── Métriques moteur ─────────────────────────────────────────────────────
-    total = python_diag.get("total_produits", 0)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Produits", total)
-    c2.metric("Avec prix", python_diag.get("avec_prix", 0))
-    c3.metric("Sans prix", python_diag.get("sans_prix", 0), help="Souvent 'sur consultation'")
-    c4.metric("Erreurs parsing", python_diag.get("erreurs_parsing", 0))
-
-    # ── Points à corriger (IA) ───────────────────────────────────────────────
-    if ai_diag.get("issues"):
-        st.markdown("**Points à revoir :**")
-        for issue in ai_diag["issues"]:
-            st.warning(issue)
-
-    if ai_diag.get("suggestions"):
-        with st.expander("💡 Suggestions de correction"):
-            for sug in ai_diag["suggestions"]:
-                st.write(f"→ {sug}")
-
-    # ── Avertissements moteur ────────────────────────────────────────────────
-    if python_diag.get("warnings"):
-        with st.expander("📊 Détail moteur"):
-            for w in python_diag["warnings"]:
-                st.caption(w)
-
-    # ── Échantillon produits ─────────────────────────────────────────────────
-    if python_diag.get("sample"):
-        feux = python_diag.get("feux", "orange")
-        with st.expander("👁️ Aperçu des 5 premiers produits", expanded=(feux == "rouge")):
-            st.dataframe(python_diag["sample"], use_container_width=True, hide_index=True)
-
-
 def fetch_pending_list() -> list[dict[str, Any]]:
     resp = api_get("/api/v1/review/pending")
     resp.raise_for_status()
@@ -324,15 +251,7 @@ def dump_yaml(data: dict[str, Any]) -> str:
 
 def transform_to_str(transform: Any) -> str:
     if isinstance(transform, list):
-        parts = []
-        for t in transform:
-            if isinstance(t, str):
-                parts.append(t)
-            elif isinstance(t, dict):
-                parts.append(t.get("name", "") or str(t))
-        return ", ".join(parts)
-    if isinstance(transform, dict):
-        return transform.get("name", "") or str(transform)
+        return ", ".join(transform)
     return transform or ""
 
 
@@ -1320,17 +1239,14 @@ counts = {"pending": 0, "approved": 0, "rejected": 0}
 for it in pending_items:
     counts[it["status"]] = counts.get(it["status"], 0) + 1
 
-counts["processing"] = sum(1 for it in pending_items if it["status"] == "processing")
-
 statut_labels = {
-    "processing": f"⏳ Analyse IA ({counts['processing']})",
     "pending": f"En attente ({counts['pending']})",
     "approved": f"Validés ({counts['approved']})",
     "rejected": f"Rejetés ({counts['rejected']})",
 }
 statut = st.sidebar.radio(
     "Statut",
-    options=["processing", "pending", "approved", "rejected"],
+    options=["pending", "approved", "rejected"],
     format_func=lambda s: statut_labels[s],
     key="statut_filter",
 )
@@ -1338,12 +1254,8 @@ statut = st.sidebar.radio(
 filtered = [item for item in pending_items if item["status"] == statut]
 
 if not filtered:
-    libelle = {"processing": "en cours d'analyse", "pending": "en attente", "approved": "validée", "rejected": "rejetée"}.get(statut, statut)
+    libelle = {"pending": "en attente", "approved": "validée", "rejected": "rejetée"}[statut]
     st.info(f"Aucune demande {libelle} pour le moment.")
-    st.stop()
-
-if statut == "processing":
-    st.info("⏳ L'analyse IA est en cours — la boucle agentique génère et valide le YAML automatiquement. Revenez dans 1 à 2 minutes.")
     st.stop()
 
 selected_idx = st.sidebar.radio(
@@ -1369,34 +1281,6 @@ c3.markdown(
     unsafe_allow_html=True,
 )
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
-
-# Score de confiance automatique (calculé à l'ingestion par la boucle agentique)
-auto_conf = meta.get("auto_confidence")
-if auto_conf is not None:
-    verdict = meta.get("auto_verdict", "")
-    resume = meta.get("auto_resume", "")
-    issues = meta.get("auto_issues", [])
-    iterations = meta.get("auto_iterations", 1)
-    verdict_color = "#00695C" if confidence >= 85 else ("#E65100" if confidence >= 60 else "#B71C1C")
-    verdict_icon = "✅" if confidence >= 85 else ("⚠️" if confidence >= 60 else "🔴")
-
-    st.markdown(
-        f'<div style="padding:10px 14px;border-radius:8px;border:1px solid {verdict_color};'
-        f'background:#fafafa;margin:10px 0">'
-        f'<span style="font-weight:700;color:{verdict_color};font-size:16px">'
-        f'{verdict_icon} Score IA automatique : {auto_conf}% — {verdict.upper()}</span>'
-        f'<span style="color:#888;font-size:12px;margin-left:12px">({iterations} tour(s) de raffinage)</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-    st.progress(auto_conf / 100)
-    if resume:
-        st.caption(resume)
-    if issues:
-        with st.expander("Points détectés automatiquement par l'agent de contrôle"):
-            for issue in issues:
-                st.write(f"⚠️ {issue}")
-    st.divider()
 
 preview_text = fetch_preview(pending_id)
 
@@ -1424,8 +1308,7 @@ with col_edit:
 
 with tab_yaml:
     st.text_area("Mapping YAML", key=yaml_key, height=500)
-    btn_col1, btn_col2 = st.columns(2)
-    if btn_col1.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
+    if st.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
         resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": st.session_state[yaml_key]})
         if resp.status_code == 200:
             st.success("YAML enregistré et validé.")
@@ -1435,14 +1318,6 @@ with tab_yaml:
                 st.write(f"- {err}")
         else:
             st.error(f"Erreur {resp.status_code} : {resp.text}")
-    if btn_col2.button("🔍 Diagnostiquer", key=f"diag_yaml_{pending_id}"):
-        with st.spinner("Parsing + analyse IA en cours…"):
-            _dr = api_post(f"/api/v1/review/{pending_id}/ai-diagnose",
-                           {"yaml_content": st.session_state[yaml_key]})
-        if _dr.status_code == 200:
-            render_diagnostic(_dr.json())
-        else:
-            st.error(f"Erreur {_dr.status_code}")
 
 with tab_form:
     current_data = load_yaml(st.session_state[yaml_key])
@@ -1463,11 +1338,7 @@ with tab_form:
             if resp.status_code == 200:
                 st.session_state[yaml_key] = new_yaml_text
                 st.success("Formulaire enregistré et validé.")
-                with st.spinner("Parsing + analyse IA en cours…"):
-                    _dr = api_post(f"/api/v1/review/{pending_id}/ai-diagnose",
-                                   {"yaml_content": new_yaml_text})
-                if _dr.status_code == 200:
-                    render_diagnostic(_dr.json())
+                st.rerun()
             elif resp.status_code == 422:
                 st.error("Configuration invalide :")
                 for err in resp.json().get("detail", []):
