@@ -418,47 +418,48 @@ def render_table_form(
         },
     )
 
-    st.markdown("##### Attributs techniques")
-    attributes_rows = []
-    for attr in data.get("attributes") or []:
-        attr = attr or {}
-        attributes_rows.append({
-            "key": attr.get("key", ""),
-            "source_col": attr.get("source_col", ""),
-            "data_type": attr.get("data_type", "string"),
-            "unit": attr.get("unit", "") or "",
-            "transform": transform_to_str(attr.get("transform")),
-        })
-    attributes_df = st.data_editor(
-        attributes_rows,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=f"attributes_editor_{pending_id}",
-        column_config={
-            "key": st.column_config.TextColumn("Clé attribut"),
-            "source_col": st.column_config.TextColumn("Colonne source"),
-            "data_type": st.column_config.TextColumn("Type (string/integer/decimal/enum)"),
-            "unit": st.column_config.TextColumn("Unité"),
-            "transform": st.column_config.TextColumn("Transformation"),
-        },
-    )
+    with st.expander("⚙️ Options avancées (attributs & validité)", expanded=False):
+        st.markdown("##### Attributs techniques")
+        attributes_rows = []
+        for attr in data.get("attributes") or []:
+            attr = attr or {}
+            attributes_rows.append({
+                "key": attr.get("key", ""),
+                "source_col": attr.get("source_col", ""),
+                "data_type": attr.get("data_type", "string"),
+                "unit": attr.get("unit", "") or "",
+                "transform": transform_to_str(attr.get("transform")),
+            })
+        attributes_df = st.data_editor(
+            attributes_rows,
+            num_rows="dynamic",
+            use_container_width=True,
+            key=f"attributes_editor_{pending_id}",
+            column_config={
+                "key": st.column_config.TextColumn("Clé attribut"),
+                "source_col": st.column_config.TextColumn("Colonne source"),
+                "data_type": st.column_config.TextColumn("Type (string/integer/decimal/enum)"),
+                "unit": st.column_config.TextColumn("Unité"),
+                "transform": st.column_config.TextColumn("Transformation"),
+            },
+        )
 
-    st.markdown("##### Validité du tarif")
-    file_metadata = data.get("file_metadata") or {}
-    vs = file_metadata.get("validity_start") or {}
-    ve = file_metadata.get("validity_end") or {}
-    c7, c8 = st.columns(2)
-    vs_cell = c7.text_input(
-        "Cellule date de début de validité", value=vs.get("cell", "") or "",
-        key=f"vs_cell_{pending_id}",
-    )
-    ve_cell = c8.text_input(
-        "Cellule date de fin de validité", value=ve.get("cell", "") or "",
-        key=f"ve_cell_{pending_id}",
-    )
-    date_tr = date_transform_selector(
-        pending_id, vs.get("transform") or ve.get("transform"), suffix="table"
-    )
+        st.markdown("##### Validité du tarif")
+        file_metadata = data.get("file_metadata") or {}
+        vs = file_metadata.get("validity_start") or {}
+        ve = file_metadata.get("validity_end") or {}
+        c7, c8 = st.columns(2)
+        vs_cell = c7.text_input(
+            "Cellule date de début de validité", value=vs.get("cell", "") or "",
+            key=f"vs_cell_{pending_id}",
+        )
+        ve_cell = c8.text_input(
+            "Cellule date de fin de validité", value=ve.get("cell", "") or "",
+            key=f"ve_cell_{pending_id}",
+        )
+        date_tr = date_transform_selector(
+            pending_id, vs.get("transform") or ve.get("transform"), suffix="table"
+        )
 
     st.markdown("##### Export Gery")
     gery_export = data.get("gery_export") or {}
@@ -903,8 +904,8 @@ def render_matrix_form(
         },
     )
 
-    st.markdown("##### Attributs techniques")
-    attr_df_out = _render_attributes(data.get("attributes"), f"matrix_attrs_{pending_id}")
+    with st.expander("⚙️ Attributs techniques", expanded=False):
+        attr_df_out = _render_attributes(data.get("attributes"), f"matrix_attrs_{pending_id}")
 
     st.markdown("##### Matrice de prix")
     pm = data.get("price_matrix") or {}
@@ -953,7 +954,8 @@ def render_matrix_form(
     pm_tr_default = transform_to_str(pm.get("transform", "parse_decimal_fr")) or "parse_decimal_fr"
     pm_tr = st.text_input("Transformation prix", value=pm_tr_default, key=f"pm_tr_{pending_id}")
 
-    fm = _render_file_metadata(data, pending_id)
+    with st.expander("⚙️ Validité du tarif", expanded=False):
+        fm = _render_file_metadata(data, pending_id)
     gery = _render_gery_export(data, pending_id)
 
     if not st.button("Enregistrer (formulaire matrix)", key=f"save_matrix_{pending_id}"):
@@ -1183,7 +1185,8 @@ def render_multi_table_form(
             tbl["row_dimension"] = t["row_dimension"]
         new_tables.append(tbl)
 
-    fm = _render_file_metadata(data, pending_id)
+    with st.expander("⚙️ Validité du tarif", expanded=False):
+        fm = _render_file_metadata(data, pending_id)
     gery = _render_gery_export(data, pending_id)
 
     if not st.button("Enregistrer (formulaire multi_table)", key=f"save_mt_{pending_id}"):
@@ -1255,12 +1258,13 @@ if not filtered:
     st.info(f"Aucune demande {libelle} pour le moment.")
     st.stop()
 
-# Le statut est déjà choisi à gauche → on n'affiche que fichier + fournisseur.
-labels = [f"{item['filename']} — {item['supplier_guess']}" for item in filtered]
 selected_idx = st.sidebar.radio(
     "Demandes",
     options=range(len(filtered)),
-    format_func=lambda i: labels[i],
+    format_func=lambda i: "{}\n{}".format(
+        filtered[i]["supplier_guess"].replace("_", " ").title(),
+        filtered[i]["filename"][:32] + "…" if len(filtered[i]["filename"]) > 32 else filtered[i]["filename"],
+    ),
     key=f"demande_{statut}",
 )
 pending_id = filtered[selected_idx]["id"]
@@ -1343,36 +1347,45 @@ with tab_form:
                 st.error(f"Erreur {resp.status_code} : {resp.text}")
 
 with tab_preview:
-    st.caption(
-        "Aperçu des lignes qui seraient générées pour Gery à partir du mapping "
-        "ci-dessus — sans rien enregistrer."
-    )
-    if st.button("🔍 Calculer l'aperçu", key=f"preview_btn_{pending_id}"):
-        resp = api_post(
-            f"/api/v1/review/{pending_id}/export-preview",
-            {"yaml_content": st.session_state[yaml_key]},
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if not data["export_enabled"]:
-                st.info("Export Gery désactivé pour ce fournisseur — aucune ligne générée.")
-            elif data["line_count"] == 0:
-                st.warning(
-                    f"{data['products_parsed']} produit(s) lus, mais 0 ligne d'export. "
-                    "Vérifie le mapping (colonnes / type de prix)."
-                )
-            else:
-                st.success(
-                    f"{data['line_count']} ligne(s) générée(s) à partir de "
-                    f"{data['products_parsed']} produit(s) lus."
-                )
-                st.dataframe(data["rows"], use_container_width=True, hide_index=True)
-        elif resp.status_code == 422:
-            st.error("Impossible de générer l'aperçu :")
-            for err in resp.json().get("detail", []):
-                st.write(f"- {err}")
+    st.caption("Aperçu recalculé automatiquement dès que le YAML change.")
+    _preview_key = f"gery_preview_{pending_id}"
+    _cached = st.session_state.get(_preview_key, {})
+    _cur_yaml = st.session_state[yaml_key]
+
+    if _cached.get("_yaml") != _cur_yaml:
+        with st.spinner("Calcul de l'aperçu Gery…"):
+            _pr = api_post(
+                f"/api/v1/review/{pending_id}/export-preview",
+                {"yaml_content": _cur_yaml},
+            )
+        if _pr.status_code == 200:
+            _pd = _pr.json()
+            _pd["_yaml"] = _cur_yaml
+            st.session_state[_preview_key] = _pd
+            _cached = _pd
+        elif _pr.status_code == 422:
+            st.error("YAML invalide — corrige le mapping pour voir l'aperçu.")
+            for _e in _pr.json().get("detail", []):
+                st.write(f"- {_e}")
+            _cached = {}
         else:
-            st.error(f"Erreur {resp.status_code} : {resp.text}")
+            st.error(f"Erreur {_pr.status_code} — aperçu indisponible.")
+            _cached = {}
+
+    if _cached:
+        if not _cached["export_enabled"]:
+            st.info("Export Gery désactivé pour ce fournisseur — aucune ligne générée.")
+        elif _cached["line_count"] == 0:
+            st.warning(
+                f"{_cached['products_parsed']} produit(s) lus, mais 0 ligne d'export. "
+                "Vérifie le mapping (colonnes / type de prix)."
+            )
+        else:
+            st.success(
+                f"{_cached['line_count']} ligne(s) générée(s) à partir de "
+                f"{_cached['products_parsed']} produit(s) lus."
+            )
+            st.dataframe(_cached["rows"], use_container_width=True, hide_index=True)
 
 with tab_ai:
     st.caption(
