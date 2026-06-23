@@ -1355,6 +1355,34 @@ c3.markdown(
 )
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 
+# Score de confiance automatique (calculé à l'ingestion par la boucle agentique)
+auto_conf = meta.get("auto_confidence")
+if auto_conf is not None:
+    verdict = meta.get("auto_verdict", "")
+    resume = meta.get("auto_resume", "")
+    issues = meta.get("auto_issues", [])
+    iterations = meta.get("auto_iterations", 1)
+    verdict_color = {"bon": "#00695C", "à revoir": "#E65100", "à refaire": "#B71C1C"}.get(verdict, "#555")
+    verdict_icon = {"bon": "✅", "à revoir": "⚠️", "à refaire": "🔴"}.get(verdict, "⚠️")
+
+    st.markdown(
+        f'<div style="padding:10px 14px;border-radius:8px;border:1px solid {verdict_color};'
+        f'background:#fafafa;margin:10px 0">'
+        f'<span style="font-weight:700;color:{verdict_color};font-size:16px">'
+        f'{verdict_icon} Score IA automatique : {auto_conf}% — {verdict.upper()}</span>'
+        f'<span style="color:#888;font-size:12px;margin-left:12px">({iterations} tour(s) de raffinage)</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress(auto_conf / 100)
+    if resume:
+        st.caption(resume)
+    if issues:
+        with st.expander("Points détectés automatiquement par l'agent de contrôle"):
+            for issue in issues:
+                st.write(f"⚠️ {issue}")
+    st.divider()
+
 preview_text = fetch_preview(pending_id)
 
 yaml_key = f"yaml_text_{pending_id}"
