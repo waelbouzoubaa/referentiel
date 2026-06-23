@@ -12,11 +12,6 @@ sys.stdout.reconfigure(encoding="utf-8")
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
 DELTA_TOKEN_FILE = Path("delta_token.json")
 FILE_CACHE_FILE = Path("file_cache.json")
-PROCESSED_FILE = Path("processed_etags.json")
-
-# eTag par item_id des fichiers déjà envoyés au middleware — évite le double
-# traitement que Graph /delta provoque parfois sur les uploads récents.
-_processed_etags: dict[str, str] = {}
 
 # Mapping dossier SharePoint (minuscules) → supplier_code, chargé depuis le
 # middleware (cf. config/suppliers/*.yaml, champ sharepoint_folder).
@@ -41,7 +36,6 @@ def _refresh_folder_mapping():
 
 
 def load_state(drive_id):
-    global _processed_etags
     delta_link = None
     file_cache = {}
     if DELTA_TOKEN_FILE.exists():
@@ -49,8 +43,6 @@ def load_state(drive_id):
         delta_link = data.get(drive_id)
     if FILE_CACHE_FILE.exists():
         file_cache = json.loads(FILE_CACHE_FILE.read_text())
-    if PROCESSED_FILE.exists():
-        _processed_etags = json.loads(PROCESSED_FILE.read_text())
     return delta_link, file_cache
 
 
@@ -61,7 +53,6 @@ def save_state(drive_id, delta_link, file_cache):
     data[drive_id] = delta_link
     DELTA_TOKEN_FILE.write_text(json.dumps(data, indent=2))
     FILE_CACHE_FILE.write_text(json.dumps(file_cache, indent=2))
-    PROCESSED_FILE.write_text(json.dumps(_processed_etags, indent=2))
 
 
 def fetch_delta(url):
@@ -129,13 +120,6 @@ def _trigger_middleware(item):
         print(f"  → Ignoré (pas un fichier Excel) : {name}")
         return
 
-    # Dédup Graph /delta : skip si même eTag déjà traité (double notification SharePoint)
-    item_id = item.get("id", "")
-    etag = item.get("eTag") or item.get("lastModifiedDateTime", "")
-    if item_id and _processed_etags.get(item_id) == etag:
-        print(f"  → Ignoré (déjà traité, même eTag) : {name}")
-        return
-
     supplier_code = _resolve_supplier_code(item)
     if supplier_code is None:
         _handle_unknown_supplier(item)
@@ -175,8 +159,6 @@ def _trigger_middleware(item):
         print(f"  → OK : {len(data.get('files', []))} fichier(s) Gery généré(s).")
         for f in data.get("files", []):
             print(f"     • {f['kind']} — {f['line_count']} ligne(s)")
-        if item_id and etag:
-            _processed_etags[item_id] = etag
     except requests.HTTPError as exc:
         print(f"  → Erreur HTTP {exc.response.status_code} : {exc.response.text[:300]}")
     except requests.ConnectionError:
