@@ -507,9 +507,15 @@ Règles :
         raw = re.sub(r"^```json\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
         result = _json.loads(raw.strip())
-        result["confidence"] = max(0, min(100, int(result.get("confidence", 0))))
-        if result.get("verdict") not in ("bon", "à revoir", "à refaire"):
+        confidence = max(0, min(100, int(result.get("confidence", 0))))
+        result["confidence"] = confidence
+        # Force la cohérence verdict ↔ confidence (l'IA peut être incohérente)
+        if confidence >= 85:
+            result["verdict"] = "bon"
+        elif confidence >= 60:
             result["verdict"] = "à revoir"
+        else:
+            result["verdict"] = "à refaire"
         if not result.get("resume"):
             result["resume"] = ""
         return result

@@ -171,8 +171,8 @@ def render_diagnostic(resp: dict[str, Any]) -> None:
     if ai_diag:
         confidence = ai_diag.get("confidence", 0)
         verdict = ai_diag.get("verdict", "à revoir")
-        verdict_color = {"bon": "#00695C", "à revoir": "#E65100", "à refaire": "#B71C1C"}.get(verdict, "#555")
-        verdict_icon = {"bon": "✅", "à revoir": "⚠️", "à refaire": "🔴"}.get(verdict, "⚠️")
+        verdict_color = "#00695C" if confidence >= 85 else ("#E65100" if confidence >= 60 else "#B71C1C")
+        verdict_icon = "✅" if confidence >= 85 else ("⚠️" if confidence >= 60 else "🔴")
 
         st.markdown(
             f'<div style="padding:12px;border-radius:8px;border:1px solid {verdict_color};margin-bottom:8px">'
@@ -324,7 +324,15 @@ def dump_yaml(data: dict[str, Any]) -> str:
 
 def transform_to_str(transform: Any) -> str:
     if isinstance(transform, list):
-        return ", ".join(transform)
+        parts = []
+        for t in transform:
+            if isinstance(t, str):
+                parts.append(t)
+            elif isinstance(t, dict):
+                parts.append(t.get("name", "") or str(t))
+        return ", ".join(parts)
+    if isinstance(transform, dict):
+        return transform.get("name", "") or str(transform)
     return transform or ""
 
 
@@ -1369,8 +1377,8 @@ if auto_conf is not None:
     resume = meta.get("auto_resume", "")
     issues = meta.get("auto_issues", [])
     iterations = meta.get("auto_iterations", 1)
-    verdict_color = {"bon": "#00695C", "à revoir": "#E65100", "à refaire": "#B71C1C"}.get(verdict, "#555")
-    verdict_icon = {"bon": "✅", "à revoir": "⚠️", "à refaire": "🔴"}.get(verdict, "⚠️")
+    verdict_color = "#00695C" if confidence >= 85 else ("#E65100" if confidence >= 60 else "#B71C1C")
+    verdict_icon = "✅" if confidence >= 85 else ("⚠️" if confidence >= 60 else "🔴")
 
     st.markdown(
         f'<div style="padding:10px 14px;border-radius:8px;border:1px solid {verdict_color};'

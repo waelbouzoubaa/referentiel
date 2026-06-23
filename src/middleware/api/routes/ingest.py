@@ -49,7 +49,7 @@ def _find_pending_for_file(folder_name: str, filename: str) -> dict | None:
         except Exception:
             continue
         if (
-            data.get("status") == "pending"
+            data.get("status") in ("pending", "processing")
             and data.get("folder_name") == folder_name
             and data.get("filename") == filename
         ):
