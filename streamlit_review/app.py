@@ -1312,14 +1312,17 @@ counts = {"pending": 0, "approved": 0, "rejected": 0}
 for it in pending_items:
     counts[it["status"]] = counts.get(it["status"], 0) + 1
 
+counts["processing"] = sum(1 for it in pending_items if it["status"] == "processing")
+
 statut_labels = {
+    "processing": f"⏳ Analyse IA ({counts['processing']})",
     "pending": f"En attente ({counts['pending']})",
     "approved": f"Validés ({counts['approved']})",
     "rejected": f"Rejetés ({counts['rejected']})",
 }
 statut = st.sidebar.radio(
     "Statut",
-    options=["pending", "approved", "rejected"],
+    options=["processing", "pending", "approved", "rejected"],
     format_func=lambda s: statut_labels[s],
     key="statut_filter",
 )
@@ -1327,8 +1330,12 @@ statut = st.sidebar.radio(
 filtered = [item for item in pending_items if item["status"] == statut]
 
 if not filtered:
-    libelle = {"pending": "en attente", "approved": "validée", "rejected": "rejetée"}[statut]
+    libelle = {"processing": "en cours d'analyse", "pending": "en attente", "approved": "validée", "rejected": "rejetée"}.get(statut, statut)
     st.info(f"Aucune demande {libelle} pour le moment.")
+    st.stop()
+
+if statut == "processing":
+    st.info("⏳ L'analyse IA est en cours — la boucle agentique génère et valide le YAML automatiquement. Revenez dans 1 à 2 minutes.")
     st.stop()
 
 selected_idx = st.sidebar.radio(

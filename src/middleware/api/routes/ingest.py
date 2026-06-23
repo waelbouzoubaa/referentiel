@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from middleware.ai.yaml_generator import (
@@ -200,24 +200,59 @@ def _run_refinement_loop(
     return supplier_code, best_yaml, initial_prompt, final_diagnosis, history
 
 
+def _refine_in_background(pending_id: str, file_path: Path, folder_name: str, filename: str) -> None:
+    """Lance la boucle agentique en tâche de fond et met à jour le pending une fois terminé."""
+    meta_path = PENDING_DIR / f"{pending_id}.json"
+    try:
+        supplier_guess, yaml_proposed, initial_prompt, auto_diagnosis, history = _run_refinement_loop(
+            file_path=file_path,
+            folder_name=folder_name,
+            filename=filename,
+        )
+        logger.info(
+            "boucle agentique terminée",
+            fichier=filename,
+            supplier=supplier_guess,
+            confidence=auto_diagnosis.get("confidence", 0),
+            iterations=len(history),
+        )
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.update({
+            "status": "pending",
+            "supplier_guess": supplier_guess,
+            "yaml_proposed": yaml_proposed,
+            "initial_prompt": initial_prompt,
+            "auto_confidence": auto_diagnosis.get("confidence", 0),
+            "auto_verdict": auto_diagnosis.get("verdict", ""),
+            "auto_resume": auto_diagnosis.get("resume", ""),
+            "auto_issues": auto_diagnosis.get("issues", []),
+            "auto_suggestions": auto_diagnosis.get("suggestions", []),
+            "auto_iterations": len(history),
+            "auto_history": history,
+        })
+    except Exception as exc:
+        logger.error("boucle agentique échouée", erreur=str(exc), fichier=filename)
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["status"] = "pending"
+        meta["yaml_proposed"] = f"# Génération échouée : {exc}\n# Complétez manuellement.\n"
+        meta["auto_confidence"] = 0
+        meta["auto_verdict"] = "à refaire"
+
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 @router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])
-def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
-    """Reçoit un fichier de fournisseur inconnu, génère un YAML via IA et notifie pour validation."""
+def ingest_unknown(request: UnknownIngestRequest, background_tasks: BackgroundTasks) -> UnknownIngestResponse:
+    """Reçoit un fichier de fournisseur inconnu, démarre la boucle agentique en arrière-plan et retourne immédiatement."""
     file_path = Path(request.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
 
-    # Dédup : une demande est déjà en attente pour ce fichier → pas de doublon
-    # (le watcher peut ré-émettre le même fichier à chaque scan tant qu'il est inconnu).
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     existing = _find_pending_for_file(request.folder_name, request.filename)
     if existing is not None:
-        file_path.unlink(missing_ok=True)  # supprime la copie téléchargée (doublon)
-        logger.info(
-            "doublon évité — demande déjà en attente",
-            pending_id=existing["id"],
-            filename=request.filename,
-        )
+        file_path.unlink(missing_ok=True)
+        logger.info("doublon évité", pending_id=existing["id"], filename=request.filename)
         return UnknownIngestResponse(
             pending_id=existing["id"],
             supplier_guess=existing.get("supplier_guess", ""),
@@ -226,70 +261,31 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
 
     pending_id = request.pending_id or uuid.uuid4().hex
 
-    # Boucle agentique : Agent1 génère → Agent2 juge → Agent1 corrige → ...
-    supplier_guess, yaml_proposed, initial_prompt, auto_diagnosis, history = _run_refinement_loop(
-        file_path=file_path,
-        folder_name=request.folder_name,
-        filename=request.filename,
-    )
-
-    logger.info(
-        "boucle agentique terminée",
-        fichier=request.filename,
-        supplier=supplier_guess,
-        confidence=auto_diagnosis.get("confidence", 0),
-        iterations=len(history),
-    )
-
-    # Stocker les métadonnées
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    # Enregistrement immédiat avec status "processing" — le watcher obtient sa réponse tout de suite
     meta = {
         "id": pending_id,
         "created_at": datetime.utcnow().isoformat(),
         "filename": request.filename,
         "folder_name": request.folder_name,
         "file_path": request.file_path,
-        "supplier_guess": supplier_guess,
-        "yaml_proposed": yaml_proposed,
-        "initial_prompt": initial_prompt,
+        "supplier_guess": request.folder_name.lower().replace(" ", "_"),
+        "yaml_proposed": "",
+        "initial_prompt": "",
         "web_url": request.web_url,
-        "status": "pending",
-        "auto_confidence": auto_diagnosis.get("confidence", 0),
-        "auto_verdict": auto_diagnosis.get("verdict", ""),
-        "auto_resume": auto_diagnosis.get("resume", ""),
-        "auto_issues": auto_diagnosis.get("issues", []),
-        "auto_suggestions": auto_diagnosis.get("suggestions", []),
-        "auto_iterations": len(history),
-        "auto_history": history,
+        "status": "processing",
+        "auto_confidence": None,
     }
     (PENDING_DIR / f"{pending_id}.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    # Notifier n8n
-    approve_url = f"{API_BASE_URL}/api/v1/review/{pending_id}/approve"
-    reject_url = f"{API_BASE_URL}/api/v1/review/{pending_id}/reject"
+    # Démarre la boucle agentique en arrière-plan (le watcher ne bloque plus)
+    background_tasks.add_task(_refine_in_background, pending_id, file_path, request.folder_name, request.filename)
 
-    try:
-        httpx.post(
-            N8N_WEBHOOK_URL,
-            json={
-                "pending_id": pending_id,
-                "filename": request.filename,
-                "folder_name": request.folder_name,
-                "supplier_guess": supplier_guess,
-                "yaml_proposed": yaml_proposed,
-                "approve_url": approve_url,
-                "reject_url": reject_url,
-            },
-            timeout=10,
-        )
-        logger.info("n8n notifié", pending_id=pending_id)
-    except Exception as exc:
-        logger.warning("notification n8n échouée", erreur=str(exc))
+    logger.info("ingest démarré en arrière-plan", pending_id=pending_id, fichier=request.filename)
 
     return UnknownIngestResponse(
         pending_id=pending_id,
-        supplier_guess=supplier_guess,
-        message=f"YAML généré pour '{supplier_guess}', en attente de validation humaine.",
+        supplier_guess=meta["supplier_guess"],
+        message=f"Analyse IA en cours pour '{request.filename}' — le YAML sera disponible dans quelques minutes.",
     )
