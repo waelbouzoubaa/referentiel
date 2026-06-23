@@ -144,6 +144,43 @@ def api_post(path: str, json_body: dict[str, Any]) -> httpx.Response:
     return httpx.post(f"{API_URL}{path}", json=json_body, timeout=60)
 
 
+def render_diagnostic(diag: dict[str, Any]) -> None:
+    """Affiche le rapport de diagnostic d'un YAML."""
+    if not diag.get("yaml_valid"):
+        st.error("YAML structurellement invalide :")
+        for e in diag.get("errors", []):
+            st.write(f"- {e}")
+        return
+
+    if not diag.get("parse_ok"):
+        st.error(f"Parsing échoué : {diag.get('fatal', 'erreur inconnue')}")
+        return
+
+    feux = diag.get("feux", "orange")
+    icone = {"vert": "✅", "orange": "⚠️", "rouge": "🔴"}.get(feux, "⚠️")
+    total = diag.get("total_produits", 0)
+    avec_prix = diag.get("avec_prix", 0)
+    sans_prix = diag.get("sans_prix", 0)
+
+    st.markdown(f"**{icone} Diagnostic — {total} produit(s) extrait(s)**")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Produits", total)
+    c2.metric("Avec prix", avec_prix)
+    c3.metric("Sans prix", sans_prix, help="Souvent 'sur consultation'")
+    c4.metric("Erreurs parsing", diag.get("erreurs_parsing", 0))
+
+    if diag.get("validity_start"):
+        st.caption(f"Validité détectée : {diag['validity_start']} → {diag.get('validity_end', '?')}")
+
+    for w in diag.get("warnings", []):
+        st.warning(w)
+
+    if diag.get("sample"):
+        with st.expander("👁️ Aperçu des 5 premiers produits extraits", expanded=(feux == "rouge")):
+            st.dataframe(diag["sample"], use_container_width=True, hide_index=True)
+
+
 def fetch_pending_list() -> list[dict[str, Any]]:
     resp = api_get("/api/v1/review/pending")
     resp.raise_for_status()
@@ -1308,7 +1345,8 @@ with col_edit:
 
 with tab_yaml:
     st.text_area("Mapping YAML", key=yaml_key, height=500)
-    if st.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
+    btn_col1, btn_col2 = st.columns(2)
+    if btn_col1.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
         resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": st.session_state[yaml_key]})
         if resp.status_code == 200:
             st.success("YAML enregistré et validé.")
@@ -1318,6 +1356,14 @@ with tab_yaml:
                 st.write(f"- {err}")
         else:
             st.error(f"Erreur {resp.status_code} : {resp.text}")
+    if btn_col2.button("🔍 Diagnostiquer", key=f"diag_yaml_{pending_id}"):
+        with st.spinner("Diagnostic en cours…"):
+            _dr = api_post(f"/api/v1/review/{pending_id}/diagnose",
+                           {"yaml_content": st.session_state[yaml_key]})
+        if _dr.status_code == 200:
+            render_diagnostic(_dr.json())
+        else:
+            st.error(f"Erreur {_dr.status_code}")
 
 with tab_form:
     current_data = load_yaml(st.session_state[yaml_key])
@@ -1338,7 +1384,11 @@ with tab_form:
             if resp.status_code == 200:
                 st.session_state[yaml_key] = new_yaml_text
                 st.success("Formulaire enregistré et validé.")
-                st.rerun()
+                with st.spinner("Diagnostic en cours…"):
+                    _dr = api_post(f"/api/v1/review/{pending_id}/diagnose",
+                                   {"yaml_content": new_yaml_text})
+                if _dr.status_code == 200:
+                    render_diagnostic(_dr.json())
             elif resp.status_code == 422:
                 st.error("Configuration invalide :")
                 for err in resp.json().get("detail", []):

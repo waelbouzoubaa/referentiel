@@ -130,6 +130,101 @@ def get_source_file(pending_id: str) -> FileResponse:
     )
 
 
+class DiagnoseRequest(BaseModel):
+    yaml_content: str
+
+
+@router.post("/review/{pending_id}/diagnose", tags=["validation"])
+def diagnose_yaml(pending_id: str, request: DiagnoseRequest) -> dict:
+    """Diagnostic fonctionnel du YAML : parse le fichier et retourne un rapport qualité.
+
+    Vérifie structurellement le YAML (Pydantic) puis l'applique sur le fichier source
+    réel pour mesurer : produits trouvés, codes manquants, prix absents, erreurs de ligne.
+    Renvoie un rapport lisible sans rien persister.
+    """
+    meta = _load_pending(pending_id)
+
+    # 1. Validation structurelle
+    rule, erreurs = validate_mapping_yaml(request.yaml_content)
+    if erreurs or rule is None:
+        return {
+            "yaml_valid": False,
+            "errors": erreurs or ["YAML invalide."],
+            "parse_ok": False,
+        }
+
+    file_path = Path(meta.get("file_path", ""))
+    if not file_path.exists():
+        return {
+            "yaml_valid": True,
+            "errors": [],
+            "parse_ok": False,
+            "fatal": "Fichier source introuvable — impossible de tester le parsing.",
+        }
+
+    # 2. Parsing fonctionnel
+    try:
+        result = parse_with_rule(file_path, rule)
+    except ParsingError as exc:
+        return {
+            "yaml_valid": True,
+            "errors": [],
+            "parse_ok": False,
+            "fatal": str(exc),
+        }
+
+    products = result.products
+    total = len(products)
+
+    sans_code = sum(1 for p in products if not p.supplier_product_code.strip())
+    sans_designation = sum(1 for p in products if not p.designation.strip())
+    sans_prix = sum(1 for p in products if not p.prices and not p.variants)
+    avec_prix = total - sans_prix
+
+    warnings: list[str] = []
+    if sans_code:
+        warnings.append(f"{sans_code} produit(s) sans code article")
+    if sans_designation:
+        warnings.append(f"{sans_designation} produit(s) sans désignation")
+    if sans_prix:
+        pct = round(sans_prix / total * 100) if total else 0
+        warnings.append(f"{sans_prix} produit(s) sans prix ({pct}% — souvent 'sur consultation')")
+    if result.error_count:
+        warnings.append(f"{result.error_count} ligne(s) en erreur lors du parsing")
+    if total == 0:
+        warnings.append("Aucun produit extrait — vérifiez les colonnes et la ligne de début de données")
+
+    sample = [
+        {
+            "code": p.supplier_product_code,
+            "designation": p.designation,
+            "prix": float(p.prices[0].amount) if p.prices else None,
+            "type_prix": p.prices[0].price_type if p.prices else None,
+            "ligne": p.source_row,
+        }
+        for p in products[:5]
+    ]
+
+    feux = "vert" if not warnings and total > 0 else ("orange" if total > 0 else "rouge")
+
+    return {
+        "yaml_valid": True,
+        "errors": [],
+        "parse_ok": True,
+        "feux": feux,
+        "total_produits": total,
+        "avec_prix": avec_prix,
+        "sans_prix": sans_prix,
+        "sans_code": sans_code,
+        "sans_designation": sans_designation,
+        "erreurs_parsing": result.error_count,
+        "warnings": warnings,
+        "sample": sample,
+        "validity_start": result.file_metadata.validity_start.isoformat() if result.file_metadata.validity_start else None,
+        "validity_end": result.file_metadata.validity_end.isoformat() if result.file_metadata.validity_end else None,
+    }
+
+
 class ExportPreviewRequest(BaseModel):
     yaml_content: str
 
