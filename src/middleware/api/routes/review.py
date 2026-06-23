@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from middleware.ai.yaml_generator import edit_yaml_with_ai, read_excel_preview
+from middleware.ai.yaml_generator import diagnose_yaml_with_ai, edit_yaml_with_ai, read_excel_preview
 from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
@@ -223,6 +223,76 @@ def diagnose_yaml(pending_id: str, request: DiagnoseRequest) -> dict:
         "validity_start": result.file_metadata.validity_start.isoformat() if result.file_metadata.validity_start else None,
         "validity_end": result.file_metadata.validity_end.isoformat() if result.file_metadata.validity_end else None,
     }
+
+
+class AiDiagnoseRequest(BaseModel):
+    yaml_content: str
+
+
+@router.post("/review/{pending_id}/ai-diagnose", tags=["validation"])
+def ai_diagnose(pending_id: str, request: AiDiagnoseRequest) -> dict:
+    """Diagnostic en deux passes : moteur Python puis juge IA (Gemini).
+
+    1. Valide le YAML (Pydantic) et parse le fichier réel → rapport chiffré.
+    2. Envoie le YAML + aperçu + résultats à Gemini → taux de confiance,
+       verdict et points précis à corriger.
+    """
+    meta = _load_pending(pending_id)
+    file_path = Path(meta.get("file_path", ""))
+
+    # Passe 1 : diagnostic moteur Python (réutilise la logique de /diagnose)
+    rule, erreurs = validate_mapping_yaml(request.yaml_content)
+    if erreurs or rule is None:
+        return {
+            "python": {"yaml_valid": False, "errors": erreurs or ["YAML invalide."], "parse_ok": False},
+            "ai": {"confidence": 0, "verdict": "à refaire", "issues": erreurs or [], "suggestions": []},
+        }
+
+    parse_results: dict = {"yaml_valid": True, "errors": [], "parse_ok": False}
+    if file_path.exists():
+        try:
+            result = parse_with_rule(file_path, rule)
+            products = result.products
+            total = len(products)
+            sans_prix = sum(1 for p in products if not p.prices and not p.variants)
+            avec_prix = total - sans_prix
+            sans_code = sum(1 for p in products if not p.supplier_product_code.strip())
+            warnings: list[str] = []
+            if sans_code:
+                warnings.append(f"{sans_code} produit(s) sans code article")
+            if sans_prix:
+                pct = round(sans_prix / total * 100) if total else 0
+                warnings.append(f"{sans_prix} produit(s) sans prix ({pct}%)")
+            if result.error_count:
+                warnings.append(f"{result.error_count} ligne(s) en erreur")
+            if total == 0:
+                warnings.append("Aucun produit extrait")
+            parse_results = {
+                "yaml_valid": True, "errors": [], "parse_ok": True,
+                "total_produits": total, "avec_prix": avec_prix,
+                "sans_prix": sans_prix, "sans_code": sans_code,
+                "erreurs_parsing": result.error_count, "warnings": warnings,
+                "feux": "vert" if not warnings and total > 0 else ("orange" if total > 0 else "rouge"),
+                "sample": [
+                    {
+                        "code": p.supplier_product_code,
+                        "designation": p.designation,
+                        "prix": float(p.prices[0].amount) if p.prices else (
+                            float(p.variants[0].prices[0].amount) if p.variants and p.variants[0].prices else None
+                        ),
+                        "ligne": p.source_row,
+                    }
+                    for p in products[:5]
+                ],
+            }
+        except ParsingError as exc:
+            parse_results = {"yaml_valid": True, "errors": [], "parse_ok": False, "fatal": str(exc)}
+
+    # Passe 2 : juge IA
+    preview = read_excel_preview(file_path) if file_path.exists() else ""
+    ai_result = diagnose_yaml_with_ai(request.yaml_content, preview, parse_results)
+
+    return {"python": parse_results, "ai": ai_result}
 
 
 class ExportPreviewRequest(BaseModel):

@@ -385,6 +385,99 @@ Génère UNIQUEMENT le YAML de configuration, sans explications, sans balises ma
     return supplier_code, yaml_text, prompt
 
 
+def diagnose_yaml_with_ai(
+    yaml_content: str,
+    preview: str,
+    parse_results: dict,
+) -> dict:
+    """Évalue la qualité d'un YAML de mapping via Gemini (rôle de juge).
+
+    Gemini reçoit le YAML proposé, l'aperçu du fichier Excel, et les résultats
+    du parsing réel (produits trouvés, prix manquants, échantillon, erreurs).
+    Il retourne un taux de confiance, un verdict et les points précis à corriger.
+
+    Args:
+        yaml_content: Le YAML proposé.
+        preview: Les premières lignes du fichier Excel (format tabulé).
+        parse_results: Dict issu de l'endpoint /diagnose (total_produits, sans_prix…).
+
+    Returns:
+        Dict avec confidence (0-100), verdict, issues, suggestions.
+    """
+    total = parse_results.get("total_produits", 0)
+    avec_prix = parse_results.get("avec_prix", 0)
+    sans_prix = parse_results.get("sans_prix", 0)
+    erreurs = parse_results.get("erreurs_parsing", 0)
+    parse_ok = parse_results.get("parse_ok", False)
+    fatal = parse_results.get("fatal", "")
+    sample = parse_results.get("sample", [])
+    warnings = parse_results.get("warnings", [])
+
+    sample_text = ""
+    for p in sample[:5]:
+        sample_text += f"  - code={p.get('code')} | désignation={p.get('designation')} | prix={p.get('prix')} | ligne={p.get('ligne')}\n"
+
+    parse_summary = (
+        f"PARSING ÉCHOUÉ : {fatal}" if not parse_ok
+        else f"Produits extraits : {total}\n"
+             f"Avec prix : {avec_prix} | Sans prix : {sans_prix}\n"
+             f"Erreurs de ligne : {erreurs}\n"
+             f"Avertissements : {'; '.join(warnings) or 'aucun'}\n"
+             f"Échantillon des premiers produits :\n{sample_text}"
+    )
+
+    prompt = f"""Tu es un expert en validation de configuration de middleware ETL (Excel → ERP Gery).
+
+## Fichier Excel analysé (premières lignes, format : Ligne N: colA\\tcolB...)
+{preview}
+
+## YAML de mapping proposé
+```yaml
+{yaml_content}
+```
+
+## Résultat du parsing réel sur le fichier complet
+{parse_summary}
+
+## Ta mission
+Analyse la cohérence entre le YAML proposé, la structure du fichier et les résultats du parsing.
+Détecte les problèmes : mauvaise ligne d'en-tête, mauvaise colonne pour le code ou le prix,
+lignes-titres non filtrées, unité manquante, type de prix incorrect, extraction_mode inadapté, etc.
+
+Réponds UNIQUEMENT en JSON valide, sans aucune explication extérieure :
+{{
+  "confidence": <entier 0-100>,
+  "verdict": "<bon|à revoir|à refaire>",
+  "issues": ["<problème précis 1>", "<problème précis 2>"],
+  "suggestions": ["<correction suggérée 1>", "<correction suggérée 2>"]
+}}
+
+Règles de scoring :
+- 85-100 : parsing OK, produits cohérents, prix présents → bon
+- 60-84 : produits trouvés mais quelques manques (prix vides normaux, warnings mineurs) → à revoir
+- 0-59  : peu ou pas de produits, erreurs de parsing, colonnes incorrectes → à refaire"""
+
+    try:
+        raw = _call_gemini(prompt)
+        raw = raw.strip()
+        raw = re.sub(r"^```json\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        import json
+        result = json.loads(raw.strip())
+        result["confidence"] = max(0, min(100, int(result.get("confidence", 0))))
+        if result.get("verdict") not in ("bon", "à revoir", "à refaire"):
+            result["verdict"] = "à revoir"
+        return result
+    except Exception as exc:
+        logger.warning("diagnostic IA échoué", erreur=str(exc))
+        return {
+            "confidence": 0,
+            "verdict": "à revoir",
+            "issues": [f"Diagnostic IA indisponible : {exc}"],
+            "suggestions": [],
+        }
+
+
 def edit_yaml_with_ai(current_yaml: str, instruction: str, preview: str = "") -> str:
     """Modifie un YAML de mapping selon une instruction en langage naturel (Gemini).
 

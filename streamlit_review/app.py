@@ -144,41 +144,75 @@ def api_post(path: str, json_body: dict[str, Any]) -> httpx.Response:
     return httpx.post(f"{API_URL}{path}", json=json_body, timeout=60)
 
 
-def render_diagnostic(diag: dict[str, Any]) -> None:
-    """Affiche le rapport de diagnostic d'un YAML."""
-    if not diag.get("yaml_valid"):
+def render_diagnostic(resp: dict[str, Any]) -> None:
+    """Affiche le rapport combiné : moteur Python + juge IA."""
+    # Gère l'ancien format (diagnostic Python seul) et le nouveau (python + ai)
+    if "python" in resp:
+        python_diag = resp["python"]
+        ai_diag = resp.get("ai", {})
+    else:
+        python_diag = resp
+        ai_diag = {}
+
+    if not python_diag.get("yaml_valid"):
         st.error("YAML structurellement invalide :")
-        for e in diag.get("errors", []):
+        for e in python_diag.get("errors", []):
             st.write(f"- {e}")
         return
 
-    if not diag.get("parse_ok"):
-        st.error(f"Parsing échoué : {diag.get('fatal', 'erreur inconnue')}")
+    if not python_diag.get("parse_ok"):
+        st.error(f"Parsing échoué : {python_diag.get('fatal', 'erreur inconnue')}")
+        if ai_diag.get("issues"):
+            for issue in ai_diag["issues"]:
+                st.warning(issue)
         return
 
-    feux = diag.get("feux", "orange")
-    icone = {"vert": "✅", "orange": "⚠️", "rouge": "🔴"}.get(feux, "⚠️")
-    total = diag.get("total_produits", 0)
-    avec_prix = diag.get("avec_prix", 0)
-    sans_prix = diag.get("sans_prix", 0)
+    # ── Verdict IA ──────────────────────────────────────────────────────────
+    if ai_diag:
+        confidence = ai_diag.get("confidence", 0)
+        verdict = ai_diag.get("verdict", "à revoir")
+        verdict_color = {"bon": "#00695C", "à revoir": "#E65100", "à refaire": "#B71C1C"}.get(verdict, "#555")
+        verdict_icon = {"bon": "✅", "à revoir": "⚠️", "à refaire": "🔴"}.get(verdict, "⚠️")
 
-    st.markdown(f"**{icone} Diagnostic — {total} produit(s) extrait(s)**")
+        st.markdown(
+            f'<div style="padding:12px;border-radius:8px;border:1px solid {verdict_color};margin-bottom:12px">'
+            f'<span style="font-size:18px;font-weight:700;color:{verdict_color}">'
+            f'{verdict_icon} {verdict.upper()} — Confiance : {confidence}%</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.progress(confidence / 100)
 
+    # ── Métriques moteur ─────────────────────────────────────────────────────
+    total = python_diag.get("total_produits", 0)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Produits", total)
-    c2.metric("Avec prix", avec_prix)
-    c3.metric("Sans prix", sans_prix, help="Souvent 'sur consultation'")
-    c4.metric("Erreurs parsing", diag.get("erreurs_parsing", 0))
+    c2.metric("Avec prix", python_diag.get("avec_prix", 0))
+    c3.metric("Sans prix", python_diag.get("sans_prix", 0), help="Souvent 'sur consultation'")
+    c4.metric("Erreurs parsing", python_diag.get("erreurs_parsing", 0))
 
-    if diag.get("validity_start"):
-        st.caption(f"Validité détectée : {diag['validity_start']} → {diag.get('validity_end', '?')}")
+    # ── Points à corriger (IA) ───────────────────────────────────────────────
+    if ai_diag.get("issues"):
+        st.markdown("**Points à revoir :**")
+        for issue in ai_diag["issues"]:
+            st.warning(issue)
 
-    for w in diag.get("warnings", []):
-        st.warning(w)
+    if ai_diag.get("suggestions"):
+        with st.expander("💡 Suggestions de correction"):
+            for sug in ai_diag["suggestions"]:
+                st.write(f"→ {sug}")
 
-    if diag.get("sample"):
-        with st.expander("👁️ Aperçu des 5 premiers produits extraits", expanded=(feux == "rouge")):
-            st.dataframe(diag["sample"], use_container_width=True, hide_index=True)
+    # ── Avertissements moteur ────────────────────────────────────────────────
+    if python_diag.get("warnings"):
+        with st.expander("📊 Détail moteur"):
+            for w in python_diag["warnings"]:
+                st.caption(w)
+
+    # ── Échantillon produits ─────────────────────────────────────────────────
+    if python_diag.get("sample"):
+        feux = python_diag.get("feux", "orange")
+        with st.expander("👁️ Aperçu des 5 premiers produits", expanded=(feux == "rouge")):
+            st.dataframe(python_diag["sample"], use_container_width=True, hide_index=True)
 
 
 def fetch_pending_list() -> list[dict[str, Any]]:
@@ -1357,8 +1391,8 @@ with tab_yaml:
         else:
             st.error(f"Erreur {resp.status_code} : {resp.text}")
     if btn_col2.button("🔍 Diagnostiquer", key=f"diag_yaml_{pending_id}"):
-        with st.spinner("Diagnostic en cours…"):
-            _dr = api_post(f"/api/v1/review/{pending_id}/diagnose",
+        with st.spinner("Parsing + analyse IA en cours…"):
+            _dr = api_post(f"/api/v1/review/{pending_id}/ai-diagnose",
                            {"yaml_content": st.session_state[yaml_key]})
         if _dr.status_code == 200:
             render_diagnostic(_dr.json())
@@ -1384,8 +1418,8 @@ with tab_form:
             if resp.status_code == 200:
                 st.session_state[yaml_key] = new_yaml_text
                 st.success("Formulaire enregistré et validé.")
-                with st.spinner("Diagnostic en cours…"):
-                    _dr = api_post(f"/api/v1/review/{pending_id}/diagnose",
+                with st.spinner("Parsing + analyse IA en cours…"):
+                    _dr = api_post(f"/api/v1/review/{pending_id}/ai-diagnose",
                                    {"yaml_content": new_yaml_text})
                 if _dr.status_code == 200:
                     render_diagnostic(_dr.json())
