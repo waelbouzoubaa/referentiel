@@ -273,7 +273,7 @@ def read_excel_preview(file_path: Path, max_rows: int = 30) -> str:
 
 
 def _call_gemini(prompt: str) -> str:
-    """Appelle l'API Gemini et retourne le texte généré."""
+    """Appelle l'API Gemini (texte seul) et retourne le texte généré."""
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY non définie dans les variables d'environnement.")
@@ -287,6 +287,37 @@ def _call_gemini(prompt: str) -> str:
     model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(prompt)
     return response.text
+
+
+def _call_gemini_with_file(file_path: Path, prompt: str) -> str:
+    """Appelle Gemini en lui joignant le fichier Excel réel (upload natif).
+
+    Gemini lit le fichier complet — pas juste les 30 premières lignes.
+    Le fichier uploadé est supprimé après l'appel pour ne pas saturer le quota.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY non définie dans les variables d'environnement.")
+
+    try:
+        import google.generativeai as genai
+    except ImportError as exc:
+        raise RuntimeError("Package google-generativeai non installé.") from exc
+
+    genai.configure(api_key=api_key)
+    file_ref = genai.upload_file(
+        path=str(file_path),
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        response = model.generate_content([file_ref, prompt])
+        return response.text
+    finally:
+        try:
+            genai.delete_file(file_ref.name)
+        except Exception:
+            pass
 
 
 def _clean_yaml_output(raw: str) -> str:
@@ -387,23 +418,22 @@ Génère UNIQUEMENT le YAML de configuration, sans explications, sans balises ma
 
 def diagnose_yaml_with_ai(
     yaml_content: str,
-    preview: str,
+    file_path: Path,
     parse_results: dict,
+    gery_rows: list[dict] | None = None,
 ) -> dict:
-    """Évalue la qualité d'un YAML de mapping via Gemini (rôle de juge).
+    """Évalue la qualité d'un YAML via Gemini avec le vrai fichier Excel.
 
-    Gemini reçoit le YAML proposé, l'aperçu du fichier Excel, et les résultats
-    du parsing réel (produits trouvés, prix manquants, échantillon, erreurs).
-    Il retourne un taux de confiance, un verdict et les points précis à corriger.
+    Gemini reçoit :
+    - Le fichier Excel complet (upload natif, pas un aperçu 30 lignes)
+    - Le YAML de mapping proposé
+    - Les résultats chiffrés du parsing moteur Python
+    - L'aperçu des premières lignes Gery qui seraient générées
 
-    Args:
-        yaml_content: Le YAML proposé.
-        preview: Les premières lignes du fichier Excel (format tabulé).
-        parse_results: Dict issu de l'endpoint /diagnose (total_produits, sans_prix…).
-
-    Returns:
-        Dict avec confidence (0-100), verdict, issues, suggestions.
+    Retourne : confidence (0-100), verdict, resume, issues, suggestions.
     """
+    import json as _json
+
     total = parse_results.get("total_produits", 0)
     avec_prix = parse_results.get("avec_prix", 0)
     sans_prix = parse_results.get("sans_prix", 0)
@@ -411,68 +441,83 @@ def diagnose_yaml_with_ai(
     parse_ok = parse_results.get("parse_ok", False)
     fatal = parse_results.get("fatal", "")
     sample = parse_results.get("sample", [])
-    warnings = parse_results.get("warnings", [])
 
-    sample_text = ""
-    for p in sample[:5]:
-        sample_text += f"  - code={p.get('code')} | désignation={p.get('designation')} | prix={p.get('prix')} | ligne={p.get('ligne')}\n"
+    if not parse_ok:
+        parse_summary = f"PARSING ÉCHOUÉ : {fatal}"
+    else:
+        sample_lines = "\n".join(
+            f"  ligne {p.get('ligne')} | code={p.get('code')} | désignation={p.get('designation')} | prix={p.get('prix')}"
+            for p in sample[:5]
+        )
+        parse_summary = (
+            f"Produits extraits : {total} | Avec prix : {avec_prix} | Sans prix : {sans_prix} | Erreurs : {erreurs}\n"
+            f"Échantillon :\n{sample_lines}"
+        )
 
-    parse_summary = (
-        f"PARSING ÉCHOUÉ : {fatal}" if not parse_ok
-        else f"Produits extraits : {total}\n"
-             f"Avec prix : {avec_prix} | Sans prix : {sans_prix}\n"
-             f"Erreurs de ligne : {erreurs}\n"
-             f"Avertissements : {'; '.join(warnings) or 'aucun'}\n"
-             f"Échantillon des premiers produits :\n{sample_text}"
-    )
+    gery_preview = ""
+    if gery_rows:
+        cols = list(gery_rows[0].keys()) if gery_rows else []
+        gery_preview = " | ".join(cols) + "\n"
+        for row in gery_rows[:10]:
+            gery_preview += " | ".join(str(row.get(c, "")) for c in cols) + "\n"
 
     prompt = f"""Tu es un expert en validation de configuration de middleware ETL (Excel → ERP Gery).
 
-## Fichier Excel analysé (premières lignes, format : Ligne N: colA\\tcolB...)
-{preview}
+Tu reçois le fichier Excel fournisseur complet en pièce jointe.
 
 ## YAML de mapping proposé
 ```yaml
 {yaml_content}
 ```
 
-## Résultat du parsing réel sur le fichier complet
+## Résultat du parsing moteur Python sur ce fichier
 {parse_summary}
 
-## Ta mission
-Analyse la cohérence entre le YAML proposé, la structure du fichier et les résultats du parsing.
-Détecte les problèmes : mauvaise ligne d'en-tête, mauvaise colonne pour le code ou le prix,
-lignes-titres non filtrées, unité manquante, type de prix incorrect, extraction_mode inadapté, etc.
+## Aperçu des premières lignes Gery qui seraient générées (export CSV)
+{gery_preview if gery_preview else "(export désactivé ou aucun produit)"}
 
-Réponds UNIQUEMENT en JSON valide, sans aucune explication extérieure :
+## Ta mission
+Compare le contenu réel du fichier Excel avec ce que le YAML en extrait et ce que Gery recevrait.
+Détecte les problèmes : mauvaise colonne, mauvaise ligne d'en-tête, lignes-titres non filtrées,
+unité incorrecte, prix dans la mauvaise colonne, extraction_mode inadapté, codes manquants, etc.
+
+Réponds UNIQUEMENT en JSON valide :
 {{
   "confidence": <entier 0-100>,
   "verdict": "<bon|à revoir|à refaire>",
+  "resume": "<1-2 phrases résumant la qualité du mapping>",
   "issues": ["<problème précis 1>", "<problème précis 2>"],
-  "suggestions": ["<correction suggérée 1>", "<correction suggérée 2>"]
+  "suggestions": ["<correction concrète 1>", "<correction concrète 2>"]
 }}
 
-Règles de scoring :
-- 85-100 : parsing OK, produits cohérents, prix présents → bon
-- 60-84 : produits trouvés mais quelques manques (prix vides normaux, warnings mineurs) → à revoir
-- 0-59  : peu ou pas de produits, erreurs de parsing, colonnes incorrectes → à refaire"""
+Règles :
+- 85-100 → bon : produits extraits, codes et prix cohérents avec le fichier
+- 60-84 → à revoir : produits trouvés mais problèmes mineurs (quelques prix vides normaux, warnings)
+- 0-59  → à refaire : parsing échoué, 0 produits, colonnes incorrectes, structure non reconnue"""
 
     try:
-        raw = _call_gemini(prompt)
+        if file_path and file_path.exists():
+            raw = _call_gemini_with_file(file_path, prompt)
+        else:
+            raw = _call_gemini(prompt)
+
         raw = raw.strip()
         raw = re.sub(r"^```json\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        import json
-        result = json.loads(raw.strip())
+        result = _json.loads(raw.strip())
         result["confidence"] = max(0, min(100, int(result.get("confidence", 0))))
         if result.get("verdict") not in ("bon", "à revoir", "à refaire"):
             result["verdict"] = "à revoir"
+        if not result.get("resume"):
+            result["resume"] = ""
         return result
+
     except Exception as exc:
         logger.warning("diagnostic IA échoué", erreur=str(exc))
         return {
             "confidence": 0,
             "verdict": "à revoir",
+            "resume": "",
             "issues": [f"Diagnostic IA indisponible : {exc}"],
             "suggestions": [],
         }

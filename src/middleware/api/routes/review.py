@@ -288,9 +288,31 @@ def ai_diagnose(pending_id: str, request: AiDiagnoseRequest) -> dict:
         except ParsingError as exc:
             parse_results = {"yaml_valid": True, "errors": [], "parse_ok": False, "fatal": str(exc)}
 
-    # Passe 2 : juge IA
-    preview = read_excel_preview(file_path) if file_path.exists() else ""
-    ai_result = diagnose_yaml_with_ai(request.yaml_content, preview, parse_results)
+    # Passe 2 : juge IA — reçoit le fichier réel + aperçu Gery + résultats Python
+    gery_rows: list = []
+    if parse_results.get("parse_ok") and rule is not None:
+        try:
+            from middleware.delta.engine import compute_delta
+            from middleware.exporter.gery import build_new_article_rows
+            from middleware.sage_codes import resolve_sage_code
+            _result = parse_with_rule(file_path, rule)
+            _delta = compute_delta(_result.products, known_hashes={})
+            gery_rows = build_new_article_rows(
+                _delta,
+                rule.gery_export,
+                _result.file_metadata.validity_start,
+                _result.file_metadata.validity_end,
+                resolve_sage_code(rule.supplier_code),
+            )
+        except Exception:
+            gery_rows = []
+
+    ai_result = diagnose_yaml_with_ai(
+        request.yaml_content,
+        file_path,
+        parse_results,
+        gery_rows=gery_rows,
+    )
 
     return {"python": parse_results, "ai": ai_result}
 

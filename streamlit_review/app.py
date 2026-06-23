@@ -175,13 +175,15 @@ def render_diagnostic(resp: dict[str, Any]) -> None:
         verdict_icon = {"bon": "✅", "à revoir": "⚠️", "à refaire": "🔴"}.get(verdict, "⚠️")
 
         st.markdown(
-            f'<div style="padding:12px;border-radius:8px;border:1px solid {verdict_color};margin-bottom:12px">'
+            f'<div style="padding:12px;border-radius:8px;border:1px solid {verdict_color};margin-bottom:8px">'
             f'<span style="font-size:18px;font-weight:700;color:{verdict_color}">'
             f'{verdict_icon} {verdict.upper()} — Confiance : {confidence}%</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
         st.progress(confidence / 100)
+        if ai_diag.get("resume"):
+            st.caption(ai_diag["resume"])
 
     # ── Métriques moteur ─────────────────────────────────────────────────────
     total = python_diag.get("total_produits", 0)
