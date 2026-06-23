@@ -20,6 +20,10 @@ def apply_transform(value: Any, transform: Transform) -> Any:
     """
     if value is None:
         return None
+    # Les cellules numériques entières arrivent comme float (ex: 560077.0).
+    # On les convertit en int pour que str() donne "560077" et non "560077.0".
+    if isinstance(value, float) and value == int(value):
+        value = int(value)
     transforms = [transform] if isinstance(transform, str) else (transform or [])
     result: Any = value
     for t in transforms:

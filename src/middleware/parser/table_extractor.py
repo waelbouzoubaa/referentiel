@@ -94,6 +94,23 @@ def parse_table_file(path: Path, rule: MappingRule) -> ParsingResult:
                 erreur=str(exc),
             )
 
+    # Déduplique par code article : un même code peut figurer dans plusieurs
+    # sections du fichier source (ex: doublon entre 2 gammes chez Alkern).
+    seen_codes: set[str] = set()
+    deduped: list[ProductPivot] = []
+    for p in products:
+        if p.supplier_product_code not in seen_codes:
+            seen_codes.add(p.supplier_product_code)
+            deduped.append(p)
+        else:
+            logger.warning(
+                "doublon ignoré",
+                supplier_code=rule.supplier_code,
+                fichier=path.name,
+                code=p.supplier_product_code,
+            )
+    products = deduped
+
     logger.info(
         "parsing terminé",
         supplier_code=rule.supplier_code,

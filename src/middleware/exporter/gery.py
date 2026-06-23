@@ -17,6 +17,15 @@ logger = get_logger(__name__)
 
 _FIELD_RE = re.compile(r"\{(\w+)\}")
 
+# Normalisation des unités fournisseur → codes Gery
+_UOM_MAP: dict[str, str] = {
+    "UN": "U", "U": "U",
+    "M2": "M2", "M²": "M2",
+    "ML": "ML", "M": "M",
+    "KG": "KG", "T": "T", "TONNE": "T",
+    "L": "L", "M3": "M3", "M³": "M3",
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Résultat de génération
 # ─────────────────────────────────────────────────────────────────────────────
@@ -144,6 +153,14 @@ def build_new_article_rows(
 # Construction des lignes
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _resolve_uom(product: ProductPivot, defaults: dict[str, Any]) -> str:
+    """Résout l'unité de mesure : attribut produit `unit_of_measure` en priorité, sinon défaut YAML."""
+    for attr in product.attributes:
+        if attr.key == "unit_of_measure":
+            return _UOM_MAP.get(attr.value.strip().upper(), attr.value.strip())
+    return defaults.get("unit_of_measure", "U")
+
+
 def _build_rows(
     deltas: list[ProductDelta],
     defaults: dict[str, Any],
@@ -165,7 +182,7 @@ def _build_rows(
                 "Code article Frns": derived_code,
                 "Description": p.designation,
                 "Article générique associé": defaults.get("article_generique", ""),
-                "Unité": defaults.get("unit_of_measure", "U"),
+                "Unité": _resolve_uom(p, defaults),
                 "Starting Date": validity_start.isoformat() if validity_start else None,
                 "Minimum Quantity": defaults.get("minimum_quantity", 1),
                 "Direct Unit Cost": float(price.amount) if price else None,
