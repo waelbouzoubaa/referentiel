@@ -138,11 +138,3 @@ docker compose down && docker compose up -d
 ```
 
 ---
-
-## 8. Quand appeler Wael (à son retour)
-- Un fichier d'une **structure nouvelle** que les 3 modes (table / matrix / multi_table) ne savent pas lire.
-- Branchement de la **vraie base des codes SAGE** (remplacer le placeholder).
-- Toute erreur qui persiste après les étapes du §7.
-
-> Wael revient le **14 juillet**. En attendant, le système traite seul les fournisseurs connus ;
-> seuls les **nouveaux** fournisseurs demandent une validation dans l'interface.
