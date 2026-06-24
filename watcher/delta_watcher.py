@@ -156,9 +156,14 @@ def _trigger_middleware(item):
         )
         resp.raise_for_status()
         data = resp.json()
-        print(f"  → OK : {len(data.get('files', []))} fichier(s) Gery généré(s).")
-        for f in data.get("files", []):
-            print(f"     • {f['kind']} — {f['line_count']} ligne(s)")
+        if data.get("anomaly_detected"):
+            print(f"  → ⚠️  ANOMALIE DÉTECTÉE — routé vers validation manuelle (ID: {data.get('anomaly_pending_id')})")
+            for issue in data.get("anomaly_issues", []):
+                print(f"     ! {issue}")
+        else:
+            print(f"  → OK : {len(data.get('files', []))} fichier(s) Gery généré(s).")
+            for f in data.get("files", []):
+                print(f"     • {f['kind']} — {f['line_count']} ligne(s)")
     except requests.HTTPError as exc:
         print(f"  → Erreur HTTP {exc.response.status_code} : {exc.response.text[:300]}")
     except requests.ConnectionError:

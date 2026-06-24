@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,8 +21,11 @@ from middleware.core.logging import get_logger
 from middleware.db.session import get_session
 from middleware.delta.engine import compute_delta
 from middleware.parser.grammar import MappingRule
+from middleware.parser.pivot import ParsingResult
 from middleware.parser.yaml_loader import load_all_mappings
 from middleware.pipeline import parse_with_rule, process_and_export
+
+PENDING_DIR = Path("/app/uploads/pending")
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -90,14 +96,42 @@ async def generate_gery_exports_endpoint(
     request: GenerateExportsRequest,
     session: AsyncSession = Depends(get_session),
 ) -> GenerateExportsResponse:
-    """Traite un fichier (parse + delta vs PostgreSQL), persiste et génère le CSV Gery."""
+    """Traite un fichier (parse + delta vs PostgreSQL), persiste et génère le CSV Gery.
+
+    Avant traitement, des contrôles de cohérence vérifient que le YAML s'applique
+    correctement au fichier. Si une anomalie est détectée (0 produit, 0 prix, trop
+    d'erreurs), le fichier est redirigé vers l'UI de validation plutôt que traité
+    en aveugle avec un mauvais YAML.
+    """
     path = Path(request.file_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
 
     rule = _load_rule(request.supplier_code)
 
-    # Parse + archivage MinIO + delta vs PostgreSQL + persistance + export (service partagé)
+    # ── Contrôles de cohérence ────────────────────────────────────────────────
+    parse_result = _parse_with_rule(path, rule)
+    issues = _check_coherence(parse_result, rule)
+
+    if issues:
+        pending_id = _create_anomaly_review(request, path, rule, issues)
+        logger.warning(
+            "anomalie détectée — routage vers validation manuelle",
+            supplier_code=request.supplier_code,
+            fichier=path.name,
+            issues=issues,
+            pending_id=pending_id,
+        )
+        return GenerateExportsResponse(
+            supplier_code=request.supplier_code,
+            files=[],
+            generated_at=datetime.utcnow(),
+            anomaly_detected=True,
+            anomaly_issues=issues,
+            anomaly_pending_id=pending_id,
+        )
+
+    # ── Traitement normal ─────────────────────────────────────────────────────
     try:
         _, _, export_result = await process_and_export(
             session,
@@ -128,6 +162,71 @@ async def generate_gery_exports_endpoint(
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _check_coherence(result: ParsingResult, rule: MappingRule) -> list[str]:
+    """Vérifie que le parsing est cohérent. Retourne les problèmes détectés (vide = OK)."""
+    issues: list[str] = []
+    total = len(result.products)
+
+    if total == 0:
+        issues.append("Aucun produit extrait — structure du fichier probablement incompatible avec le YAML actuel")
+        return issues
+
+    if result.error_count > 0 and result.error_count / total > 0.5:
+        pct = round(result.error_count / total * 100)
+        issues.append(
+            f"{result.error_count}/{total} lignes en erreur ({pct}%) — "
+            "les colonnes ont peut-être bougé dans ce fichier"
+        )
+
+    if rule.prices:
+        avec_prix = sum(1 for p in result.products if p.prices or p.variants)
+        if avec_prix == 0:
+            issues.append(
+                "0 produit avec prix alors que le YAML en attend — "
+                "la colonne prix est probablement incorrecte ou décalée"
+            )
+
+    return issues
+
+
+def _create_anomaly_review(
+    request: GenerateExportsRequest,
+    file_path: Path,
+    rule: MappingRule,
+    issues: list[str],
+) -> str:
+    """Crée une demande de révision manuelle visible dans l'UI de validation."""
+    from ruamel.yaml import YAML as _YAML
+    import io
+
+    # Recharge le YAML brut pour l'afficher dans l'UI
+    config_dir = Path("config/suppliers")
+    yaml_file = config_dir / f"{rule.supplier_code}_v1.yaml"
+    yaml_content = yaml_file.read_text(encoding="utf-8") if yaml_file.exists() else ""
+
+    pending_id = uuid.uuid4().hex
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+
+    meta = {
+        "id": pending_id,
+        "created_at": datetime.utcnow().isoformat(),
+        "filename": request.original_filename or file_path.name,
+        "folder_name": rule.supplier_code,
+        "file_path": str(file_path),
+        "supplier_guess": rule.supplier_code,
+        "yaml_proposed": yaml_content,
+        "initial_prompt": "",
+        "web_url": None,
+        "status": "pending",
+        "anomaly": True,
+        "anomaly_issues": issues,
+    }
+    (PENDING_DIR / f"{pending_id}.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return pending_id
+
 
 def _load_rule(supplier_code: str) -> MappingRule:
     """Charge la règle YAML active pour un fournisseur."""

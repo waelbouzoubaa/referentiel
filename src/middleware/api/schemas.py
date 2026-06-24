@@ -102,6 +102,9 @@ class GenerateExportsResponse(BaseModel):
     supplier_code: str
     files: list[GeneratedFileOut]
     generated_at: datetime
+    anomaly_detected: bool = False
+    anomaly_issues: list[str] = []
+    anomaly_pending_id: str | None = None
 
 
 # ─── Audit ────────────────────────────────────────────────────────────────────
