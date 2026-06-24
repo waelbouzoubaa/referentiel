@@ -1301,6 +1301,25 @@ with col_preview:
         st.caption("Le lien d'ouverture SharePoint apparaît pour les fichiers détectés "
                    "par le watcher (nouvelles demandes).")
 
+    st.divider()
+    st.markdown("##### 📤 Aperçu export Gery")
+    _gery_cache = st.session_state.get(f"gery_preview_{pending_id}", {})
+    if _gery_cache:
+        if not _gery_cache.get("export_enabled"):
+            st.info("Export Gery désactivé pour ce fournisseur.")
+        elif _gery_cache.get("line_count", 0) == 0:
+            st.warning(
+                f"{_gery_cache.get('products_parsed', 0)} produit(s) lus, 0 ligne générée. "
+                "Vérifiez les colonnes."
+            )
+        else:
+            st.caption(
+                f"{_gery_cache['line_count']} ligne(s) · {_gery_cache['products_parsed']} produit(s)"
+            )
+            st.dataframe(_gery_cache["rows"], use_container_width=True, hide_index=True)
+    else:
+        st.caption("💡 L'aperçu apparaît ici après avoir enregistré le formulaire ou le YAML.")
+
 with col_edit:
     tab_yaml, tab_form, tab_preview, tab_ai = st.tabs(
         ["YAML", "Formulaire simplifié", "Aperçu export Gery", "🤖 Assistant IA"]
