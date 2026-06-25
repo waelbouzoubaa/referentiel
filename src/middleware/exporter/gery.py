@@ -86,7 +86,9 @@ def generate_gery_exports(
         logger.info("gery_export désactivé", supplier_code=supplier_code)
         return GeryExportResult()
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Organise les exports par dossier fournisseur (sharepoint_folder ou supplier_code)
+    supplier_dir = output_dir / supplier_code
+    supplier_dir.mkdir(parents=True, exist_ok=True)
     result = GeryExportResult()
     defaults = export_config.defaults
     price_field = export_config.price_export_mapping.direct_unit_cost
@@ -106,10 +108,9 @@ def generate_gery_exports(
     )
 
     if rows:
-        # Nom horodaté : on conserve l'historique des exports (chaque génération
-        # crée un fichier distinct au lieu d'écraser le précédent).
+        # Nom horodaté dans le sous-dossier du fournisseur
         ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-        path = output_dir / f"NEW_ARTICLE_{supplier_code}_{ts}.csv"
+        path = supplier_dir / f"NEW_ARTICLE_{supplier_code}_{ts}.csv"
         _write_csv(path, NEW_ARTICLE_COLS, rows)
         result.files.append(GeneratedFile(
             kind="NEW_ARTICLE",

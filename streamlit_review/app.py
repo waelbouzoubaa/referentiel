@@ -197,11 +197,11 @@ def render_help_view() -> None:
 
 
 def render_exports_view() -> None:
-    """Vue de consultation et téléchargement des exports Gery (tous fournisseurs)."""
+    """Vue de consultation et téléchargement des exports Gery, groupés par fournisseur."""
     st.subheader("📤 Exports Gery générés")
     st.caption(
-        "Fichiers CSV produits automatiquement pour les fournisseurs connus "
-        "(à chaque modification, sans validation) ou après validation d'un nouveau fournisseur."
+        "Fichiers CSV produits automatiquement, organisés par dossier fournisseur. "
+        "Cliquez sur 'YAML' pour voir la configuration appliquée."
     )
     try:
         resp = api_get("/api/v1/exports")
@@ -214,22 +214,50 @@ def render_exports_view() -> None:
         st.info("Aucun export généré pour le moment.")
         return
 
-    h1, h2, h3, h4 = st.columns([4, 1, 2, 1])
-    h1.markdown("**Fichier**")
-    h2.markdown("**Lignes**")
-    h3.markdown("**Généré le**")
-    h4.markdown("**Télécharger**")
+    # Grouper par dossier fournisseur
+    folders: dict[str, list[dict]] = {}
     for e in exports:
-        c1, c2, c3, c4 = st.columns([4, 1, 2, 1])
-        c1.write(e["filename"])
-        c2.write(str(e["line_count"]))
-        c3.write(e["modified_at"][:19].replace("T", " "))
-        try:
-            data = api_get(f"/api/v1/exports/{e['filename']}/download").content
-            c4.download_button("⬇️", data=data, file_name=e["filename"],
-                               mime="text/csv", key=f"dlx_{e['filename']}")
-        except Exception:
-            c4.warning("indispo")
+        folders.setdefault(e["folder"], []).append(e)
+
+    for folder, items in sorted(folders.items()):
+        with st.expander(f"📁 {folder.upper()} — {len(items)} export(s)", expanded=True):
+            h1, h2, h3, h4, h5 = st.columns([4, 1, 2, 1, 1])
+            h1.markdown("**Fichier**")
+            h2.markdown("**Lignes**")
+            h3.markdown("**Généré le**")
+            h4.markdown("**CSV**")
+            h5.markdown("**YAML**")
+            for e in items:
+                c1, c2, c3, c4, c5 = st.columns([4, 1, 2, 1, 1])
+                c1.write(e["filename"])
+                c2.write(str(e["line_count"]))
+                c3.write(e["modified_at"][:19].replace("T", " "))
+                try:
+                    data = api_get(f"/api/v1/exports/{e['folder']}/{e['filename']}/download").content
+                    c4.download_button("⬇️", data=data, file_name=e["filename"],
+                                       mime="text/csv", key=f"dlx_{e['folder']}_{e['filename']}")
+                except Exception:
+                    c4.warning("—")
+                if c5.button("📋", key=f"yaml_{e['folder']}_{e['filename']}", help="Voir le YAML appliqué"):
+                    st.session_state[f"show_yaml_{e['folder']}_{e['filename']}"] = True
+
+            # Affichage du YAML si demandé
+            for e in items:
+                key = f"show_yaml_{e['folder']}_{e['filename']}"
+                if st.session_state.get(key):
+                    try:
+                        yaml_resp = api_get(f"/api/v1/exports/{e['folder']}/{e['filename']}/yaml")
+                        if yaml_resp.status_code == 200:
+                            yaml_data = yaml_resp.json()
+                            st.markdown(f"**YAML appliqué pour `{yaml_data['supplier_code']}`**")
+                            st.code(yaml_data["yaml_content"], language="yaml")
+                        else:
+                            st.warning("YAML introuvable pour cet export.")
+                    except Exception as exc:
+                        st.error(f"Erreur : {exc}")
+                    if st.button("Fermer", key=f"close_yaml_{e['folder']}_{e['filename']}"):
+                        st.session_state[key] = False
+                        st.rerun()
 
 
 # ─── Helpers YAML ───────────────────────────────────────────────────────────

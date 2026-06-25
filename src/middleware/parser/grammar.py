@@ -310,6 +310,11 @@ class MappingRule(BaseModel):
     # Si absent, le watcher utilise supplier_code comme nom de dossier.
     sharepoint_folder: str | list[str] | None = None
 
+    # Mots-clés à chercher dans le nom du fichier pour activer ce YAML.
+    # Vide = s'applique à tous les fichiers du dossier.
+    # Non-vide = s'applique uniquement si le nom de fichier contient au moins un mot-clé.
+    filename_keywords: list[str] = Field(default_factory=list)
+
     sheet_match: str | dict[str, str] = "auto"
     header_detection: HeaderDetection = Field(default_factory=lambda: HeaderDetection(mode="explicit", row=1))
     data_starts_row: int = Field(ge=1)

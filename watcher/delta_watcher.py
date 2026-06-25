@@ -13,25 +13,20 @@ GRAPH_URL = "https://graph.microsoft.com/v1.0"
 DELTA_TOKEN_FILE = Path("delta_token.json")
 FILE_CACHE_FILE = Path("file_cache.json")
 
-# Mapping dossier SharePoint (minuscules) → supplier_code, chargé depuis le
-# middleware (cf. config/suppliers/*.yaml, champ sharepoint_folder).
+# Mapping dossier SharePoint (minuscules) → liste de {supplier_code, filename_keywords}
 # Mis à jour à chaque cycle de polling — voir _refresh_folder_mapping().
-_folder_to_supplier: dict[str, str] = {}
+_folder_to_suppliers: dict[str, list[dict]] = {}
 
 
 def _refresh_folder_mapping():
-    """Recharge le mapping dossier→fournisseur depuis le middleware.
-
-    En cas d'échec, conserve le dernier mapping connu (le middleware peut être
-    temporairement indisponible sans bloquer le watcher).
-    """
-    global _folder_to_supplier
+    """Recharge le mapping dossier→fournisseurs depuis le middleware."""
+    global _folder_to_suppliers
     try:
         resp = requests.get(f"{MIDDLEWARE_API_URL}/suppliers/folder-mapping", timeout=15)
         resp.raise_for_status()
-        _folder_to_supplier = resp.json()
+        _folder_to_suppliers = resp.json()
     except Exception as exc:
-        if not _folder_to_supplier:
+        if not _folder_to_suppliers:
             print(f"  → Impossible de charger le mapping fournisseurs ({exc})")
 
 
@@ -241,6 +236,12 @@ def _handle_unknown_supplier(item):
 
 
 def _resolve_supplier_code(item) -> str | None:
+    """Résout le supplier_code pour un fichier SharePoint.
+
+    Cherche dans le dossier du fichier tous les YAMLs candidats.
+    Si plusieurs YAMLs existent pour ce dossier, utilise les filename_keywords
+    pour choisir le bon. Sans keywords → s'applique à tous les fichiers du dossier.
+    """
     name = item.get("name", "").lower()
     parent_path = item.get("parentReference", {}).get("path", "")
     if "root:" in parent_path:
@@ -248,14 +249,29 @@ def _resolve_supplier_code(item) -> str | None:
     else:
         folder = parent_path.strip("/").split("/")[-1]
 
-    code = _folder_to_supplier.get(folder.lower())
+    candidates = _folder_to_suppliers.get(folder.lower(), [])
+    if not candidates:
+        return None
 
-    # Atlantic : distingue chauffage vs eau par le nom du fichier
-    if code == "atlantic_scga_chauffage":
-        if any(kw in name for kw in ("eau", "sanitaire", "thermodynamique")):
-            code = "atlantic_scga_eau"
+    # Un seul YAML pour ce dossier → s'applique sans condition
+    if len(candidates) == 1:
+        return candidates[0]["supplier_code"]
 
-    return code
+    # Plusieurs YAMLs → on cherche celui dont les keywords correspondent au nom du fichier
+    for candidate in candidates:
+        keywords = candidate.get("filename_keywords") or []
+        if not keywords:
+            # YAML sans keyword = joker (fallback si rien d'autre ne matche)
+            continue
+        if any(kw.lower() in name for kw in keywords):
+            return candidate["supplier_code"]
+
+    # Aucun keyword ne matche → fallback sur le premier YAML sans keyword
+    for candidate in candidates:
+        if not (candidate.get("filename_keywords") or []):
+            return candidate["supplier_code"]
+
+    return None
 
 
 def run():
