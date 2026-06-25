@@ -35,6 +35,39 @@ class UnknownIngestResponse(BaseModel):
     message: str
 
 
+def _inject_sharepoint_folder(yaml_content: str, folder_name: str) -> str:
+    """Corrige sharepoint_folder dans le YAML avec le vrai dossier SharePoint source.
+
+    Gemini peut deviner un mauvais dossier — on l'écrase avec la valeur réelle
+    issue des métadonnées du fichier. Ajoute aussi filename_keywords vide si absent.
+    """
+    import re
+    folder_line = f'sharepoint_folder: "{folder_name}"'
+
+    if re.search(r'^sharepoint_folder:', yaml_content, re.MULTILINE):
+        yaml_content = re.sub(r'^sharepoint_folder:.*$', folder_line, yaml_content, flags=re.MULTILINE)
+    else:
+        # Insère après la ligne supplier_code
+        yaml_content = re.sub(
+            r'(^supplier_code:.*$)',
+            r'\1\n' + folder_line,
+            yaml_content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    if not re.search(r'^filename_keywords:', yaml_content, re.MULTILINE):
+        yaml_content = re.sub(
+            r'(^sharepoint_folder:.*$)',
+            r'\1\nfilename_keywords: []',
+            yaml_content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    return yaml_content
+
+
 def _find_pending_for_file(folder_name: str, filename: str) -> dict | None:
     """Retourne une demande déjà 'pending' pour ce (dossier, fichier), sinon None."""
     if not PENDING_DIR.exists():
@@ -86,10 +119,18 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
             folder_name=request.folder_name,
             filename=request.filename,
         )
+        # Garantit que sharepoint_folder pointe vers le vrai dossier SharePoint source
+        yaml_proposed = _inject_sharepoint_folder(yaml_proposed, request.folder_name)
     except Exception as exc:
         logger.error("génération YAML IA échouée", erreur=str(exc))
         supplier_guess = request.folder_name.lower().replace(" ", "_")
-        yaml_proposed = f"# Génération automatique échouée : {exc}\n# Complétez ce YAML manuellement.\nsupplier_code: \"{supplier_guess}\"\n"
+        yaml_proposed = (
+            f'# Génération automatique échouée : {exc}\n'
+            f'# Complétez ce YAML manuellement.\n'
+            f'supplier_code: "{supplier_guess}"\n'
+            f'sharepoint_folder: "{request.folder_name}"\n'
+            f'filename_keywords: []\n'
+        )
         initial_prompt = f"(génération échouée : {exc})"
 
     # Stocker les métadonnées

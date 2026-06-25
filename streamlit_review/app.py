@@ -760,17 +760,30 @@ def _render_general_info(data: dict[str, Any], pending_id: str) -> dict[str, Any
     data_starts_row = c6.number_input("Première ligne de données", min_value=1, step=1,
                                       value=int(data.get("data_starts_row") or (header_row + 1)),
                                       key=f"dsr_{pending_id}")
+
+    existing_kw = data.get("filename_keywords") or []
+    kw_str = st.text_input(
+        "Mots-clés du fichier (séparés par virgules)",
+        value=", ".join(existing_kw),
+        key=f"kw_{pending_id}",
+        help=(
+            "Ce YAML ne s'appliquera qu'aux fichiers dont le nom contient au moins un de ces mots. "
+            "Laisser vide = s'applique à tous les fichiers du dossier SharePoint. "
+            "Ex: Chauffage, chauffage"
+        ),
+    )
+
     base: dict[str, Any] = {
         "supplier_code": supplier_code.strip(),
         "mapping_version": int(data.get("mapping_version", 1)),
         "description": description,
         "upload_mode": upload_mode,
+        "sharepoint_folder": data.get("sharepoint_folder", ""),
+        "filename_keywords": [k.strip() for k in kw_str.split(",") if k.strip()],
         "sheet_match": sheet_match if isinstance(sheet_match, dict) else sheet_match_val,
         "header_detection": {"mode": hd.get("mode", "explicit"), "row": int(header_row)},
         "data_starts_row": int(data_starts_row),
     }
-    if "sharepoint_folder" in data:
-        base["sharepoint_folder"] = data["sharepoint_folder"]
     return base
 
 

@@ -253,24 +253,25 @@ def _resolve_supplier_code(item) -> str | None:
     if not candidates:
         return None
 
-    # Un seul YAML pour ce dossier → s'applique sans condition
-    if len(candidates) == 1:
-        return candidates[0]["supplier_code"]
+    # Pour chaque YAML candidat : si keywords définis → ils doivent matcher le nom du fichier
+    #                              si pas de keywords → joker (s'applique à tout)
+    matched_with_keywords = []
+    fallbacks = []  # YAMLs sans keywords (jokers)
 
-    # Plusieurs YAMLs → on cherche celui dont les keywords correspondent au nom du fichier
     for candidate in candidates:
         keywords = candidate.get("filename_keywords") or []
         if not keywords:
-            # YAML sans keyword = joker (fallback si rien d'autre ne matche)
-            continue
-        if any(kw.lower() in name for kw in keywords):
-            return candidate["supplier_code"]
+            fallbacks.append(candidate)
+        elif any(kw.lower() in name for kw in keywords):
+            matched_with_keywords.append(candidate)
 
-    # Aucun keyword ne matche → fallback sur le premier YAML sans keyword
-    for candidate in candidates:
-        if not (candidate.get("filename_keywords") or []):
-            return candidate["supplier_code"]
+    # Priorité : match par keyword > joker sans keyword
+    if matched_with_keywords:
+        return matched_with_keywords[0]["supplier_code"]
+    if fallbacks:
+        return fallbacks[0]["supplier_code"]
 
+    # Aucun YAML ne correspond → fichier inconnu → validation manuelle
     return None
 
 
