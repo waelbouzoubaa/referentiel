@@ -357,7 +357,11 @@ def download_export(pending_id: str, filename: str | None = None) -> FileRespons
     if target not in exports:
         raise HTTPException(status_code=404, detail=f"Fichier inconnu : {target}")
 
-    path = EXPORTS_DIR / target
+    # Les exports sont organisés dans un sous-dossier par supplier_code
+    supplier_code = meta.get("supplier_code", "")
+    path = EXPORTS_DIR / supplier_code / target if supplier_code else EXPORTS_DIR / target
+    if not path.exists():
+        path = EXPORTS_DIR / target  # fallback chemin plat (anciens exports)
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {target}")
 
