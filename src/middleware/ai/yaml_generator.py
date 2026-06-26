@@ -53,6 +53,9 @@ file_metadata:
   validity_end:
     cell: "C5"
     transform: "parse_date_iso"
+  ramery_generic_code:
+    cell: "A8"
+    transform: "extract_integer"
 
 gery_export:
   enabled: true
@@ -151,9 +154,9 @@ file_metadata:
   validity_end:
     cell: "J4"
     transform: "parse_date_iso"
-  client_article_code:
-    regex: "Code article Ramery\\s*:\\s*(\\d+)"
-    in_cell: "A6"
+  ramery_generic_code:
+    cell: "A6"
+    transform: "extract_integer"
 
 gery_export:
   enabled: true
@@ -249,6 +252,9 @@ file_metadata:
       validity_start: 1
       validity_end: 2
     transform: "parse_date_fr"
+  ramery_generic_code:
+    cell: "B2"
+    transform: "extract_integer"
 
 gery_export:
   enabled: false
@@ -363,6 +369,27 @@ Respecte EXACTEMENT la structure des exemples ci-dessous.
 - ColumnMapping : exactement 1 source parmi source_col, constant, derived_from
 - gery_export.enabled = false → blocked_reason obligatoire
 
+## Code article générique Ramery (OBLIGATOIRE à chercher) :
+Cherche TOUJOURS dans le cartouche (lignes 1-10 environ) une cellule contenant
+un texte du type "Code article Ramery 1750", "Article générique 1480", "Réf. Ramery 1234"
+ou simplement un nombre seul qui représente un code Ramery.
+- Si la cellule contient un TEXTE MIXTE (ex. "Code article Ramery 1750") :
+    ramery_generic_code:
+      cell: "A8"
+      transform: "extract_integer"
+- Si la cellule contient UNIQUEMENT le code numérique (ex. "1750") :
+    ramery_generic_code:
+      cell: "A8"
+- Si tu ne trouves pas cette cellule → omets la clé ramery_generic_code (ne l'invente pas).
+
+## Règle impérative sur les regex dans file_metadata :
+Pour toute valeur regex, utilise TOUJOURS des guillemets simples YAML ('...')
+sauf si la regex contient elle-même une apostrophe (ex : "l'offre") — dans ce
+dernier cas seulement, utilise des guillemets doubles avec \\\\ pour chaque backslash.
+Exemples corrects :
+  regex: '(\\d+)'           ← guillemets simples, backslash simple
+  regex: "l'offre (\\d+)"  ← guillemets doubles car apostrophe, double backslash
+
 ## Fichier à analyser :
 Nom : {filename}
 Dossier SharePoint : {folder_name}
@@ -409,6 +436,10 @@ Applique cette demande en modifiant le YAML. Contraintes :
 - Garde la même grammaire (ne change pas extraction_mode sauf si demandé, n'invente pas de clés).
 - transforms autorisés uniquement : {transforms_list}
 - Dates JJ/MM/AAAA → parse_date_fr ; dates AAAA-MM-JJ → parse_date_iso.
+- ramery_generic_code dans file_metadata : transform "extract_integer" si la cellule
+  contient du texte mixte ("Code article Ramery 1750" → "1750"), sans transform si c'est juste un chiffre.
+- Pour les regex : guillemets simples ('...') sauf si la regex contient une apostrophe
+  (dans ce cas guillemets doubles avec \\\\ pour chaque backslash).
 
 Réponds UNIQUEMENT avec le YAML complet mis à jour, sans explication ni balises markdown."""
 
