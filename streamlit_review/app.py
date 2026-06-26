@@ -1401,6 +1401,20 @@ with col_preview:
             _cached = {}
 
     if _cached:
+        # Bloc métadonnées cartouche — toujours affiché si dispo
+        _fm = _cached.get("file_metadata") or {}
+        if _fm:
+            _meta_parts = []
+            if _fm.get("ramery_generic_code"):
+                _meta_parts.append(f"**Code générique Ramery :** `{_fm['ramery_generic_code']}`")
+            else:
+                _meta_parts.append("**Code générique Ramery :** ⚠️ *non trouvé — vérifiez la cellule dans file_metadata*")
+            if _fm.get("validity_start"):
+                _meta_parts.append(f"**Validité :** {_fm['validity_start']} → {_fm.get('validity_end', '?')}")
+            if _fm.get("contract_reference"):
+                _meta_parts.append(f"**Réf. contrat :** {_fm['contract_reference']}")
+            st.info("  ·  ".join(_meta_parts))
+
         if not _cached.get("export_enabled"):
             st.info("Export Gery désactivé pour ce fournisseur.")
         elif _cached.get("line_count", 0) == 0:

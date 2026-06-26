@@ -166,12 +166,21 @@ def export_preview(pending_id: str, request: ExportPreviewRequest) -> dict:
         resolve_sage_code(rule.supplier_code),
         result.file_metadata.ramery_generic_code,
     )
+    fm = result.file_metadata
     return {
         "columns": NEW_ARTICLE_COLS,
         "rows": rows,
         "line_count": len(rows),
         "products_parsed": len(result.products),
         "export_enabled": rule.gery_export.enabled,
+        "file_metadata": {
+            "ramery_generic_code": fm.ramery_generic_code,
+            "validity_start": fm.validity_start.isoformat() if fm.validity_start else None,
+            "validity_end": fm.validity_end.isoformat() if fm.validity_end else None,
+            "contract_reference": fm.contract_reference,
+            "geographic_scope": fm.geographic_scope,
+            "organizational_scope": fm.organizational_scope,
+        },
     }
 
 
