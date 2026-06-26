@@ -1367,6 +1367,34 @@ with col_edit:
     )
 
 with tab_yaml:
+    # Chargement depuis un YAML existant du même dossier fournisseur
+    _folder_key = meta["folder_name"].lower()
+    try:
+        _fm_resp = api_get("/api/v1/suppliers/folder-mapping")
+        _folder_yamls = _fm_resp.json().get(_folder_key, []) if _fm_resp.status_code == 200 else []
+    except Exception:
+        _folder_yamls = []
+
+    if _folder_yamls:
+        _yaml_options = ["— partir de zéro (IA) —"] + [e["supplier_code"] for e in _folder_yamls]
+        _chosen = st.selectbox(
+            "📂 Charger un YAML existant du dossier comme base",
+            _yaml_options,
+            key=f"yaml_loader_{pending_id}",
+            help="Utile quand un autre fichier du même fournisseur a déjà un mapping validé.",
+        )
+        if _chosen != _yaml_options[0]:
+            if st.button("Charger ce YAML", key=f"load_yaml_btn_{pending_id}", type="primary"):
+                try:
+                    _yr = api_get(f"/api/v1/suppliers/{_chosen}/yaml")
+                    if _yr.status_code == 200:
+                        st.session_state[yaml_key] = _yr.json()["yaml_content"]
+                        st.rerun()
+                    else:
+                        st.error(f"Impossible de charger le YAML ({_yr.status_code}).")
+                except Exception as _exc:
+                    st.error(f"Erreur : {_exc}")
+
     st.text_area("Mapping YAML", key=yaml_key, height=500)
     if st.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
         resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": st.session_state[yaml_key]})
