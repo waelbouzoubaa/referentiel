@@ -1344,8 +1344,11 @@ c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 preview_text = fetch_preview(pending_id)
 
 yaml_key = f"yaml_text_{pending_id}"
+yaml_content_key = f"yaml_content_{pending_id}"
 if yaml_key not in st.session_state:
     st.session_state[yaml_key] = meta["yaml_proposed"]
+if yaml_content_key not in st.session_state:
+    st.session_state[yaml_content_key] = meta["yaml_proposed"]
 
 # Écran partagé : édition à gauche, aperçu Excel (grille A,B,C + lignes) à droite.
 col_edit, col_preview = st.columns([3, 2])
@@ -1365,7 +1368,7 @@ with col_preview:
 
     _preview_key = f"gery_preview_{pending_id}"
     _cached = st.session_state.get(_preview_key, {})
-    _cur_yaml = st.session_state.get(yaml_key, "")
+    _cur_yaml = st.session_state.get(yaml_content_key, "")
     _force = st.session_state.pop(f"force_recalc_{pending_id}", False)
 
     if st.button("🔄 Recalculer l'aperçu", key=f"recalc_preview_{pending_id}"):
@@ -1430,7 +1433,9 @@ with tab_yaml:
                 try:
                     _yr = api_get(f"/api/v1/suppliers/{_chosen}/yaml")
                     if _yr.status_code == 200:
-                        st.session_state[yaml_key] = _yr.json()["yaml_content"]
+                        _loaded = _yr.json()["yaml_content"]
+                        st.session_state[yaml_key] = _loaded
+                        st.session_state[yaml_content_key] = _loaded
                         st.rerun()
                     else:
                         st.error(f"Impossible de charger le YAML ({_yr.status_code}).")
@@ -1446,14 +1451,19 @@ with tab_yaml:
         with st.spinner("L'IA analyse le fichier…"):
             _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
         if _gen_resp.status_code == 200:
-            st.session_state[yaml_key] = _gen_resp.json()["yaml"]
+            _gen_yaml = _gen_resp.json()["yaml"]
+            st.session_state[yaml_key] = _gen_yaml
+            st.session_state[yaml_content_key] = _gen_yaml
             st.rerun()
         elif _gen_resp.status_code == 404:
             st.error("Fichier source introuvable — impossible de générer le YAML.")
         else:
             st.error(f"Erreur IA ({_gen_resp.status_code}) : {_gen_resp.text[:200]}")
 
-    st.text_area("Mapping YAML", key=yaml_key, height=500)
+    def _sync_yaml_content():
+        st.session_state[yaml_content_key] = st.session_state.get(yaml_key, "")
+
+    st.text_area("Mapping YAML", key=yaml_key, height=500, on_change=_sync_yaml_content)
     if st.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
         resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": st.session_state[yaml_key]})
         if resp.status_code == 200:
@@ -1483,6 +1493,7 @@ with tab_form:
             resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": new_yaml_text})
             if resp.status_code == 200:
                 st.session_state[yaml_key] = new_yaml_text
+                st.session_state[yaml_content_key] = new_yaml_text
                 st.success("Formulaire enregistré et validé.")
                 st.rerun()
             elif resp.status_code == 422:
@@ -1521,6 +1532,7 @@ with tab_ai:
         if resp.status_code == 200:
             data = resp.json()
             st.session_state[yaml_key] = data["yaml"]
+            st.session_state[yaml_content_key] = data["yaml"]
             if data["valid"]:
                 st.session_state[chat_key].append((
                     "assistant",
