@@ -178,23 +178,40 @@ def render_help_view() -> None:
     """Vue d'aide : affiche les guides (création de YAML + runbook) dans l'app."""
     st.subheader("❓ Aide")
     st.caption("Guides pour créer les mappings et opérer le système.")
-    tab_guide, tab_runbook = st.tabs(
-        ["📝 Créer un YAML (table simple)", "🛠️ Runbook (opérer / dépanner)"]
-    )
-    with tab_guide:
+    tab_table, tab_matrix, tab_multi, tab_runbook = st.tabs([
+        "📋 Table simple (Atlantic…)",
+        "🔢 Matrix (Airisol…)",
+        "📑 Multi-table (Agenor…)",
+        "🛠️ Runbook",
+    ])
+    with tab_table:
         doc = _DOCS_DIR / "GUIDE_YAML_TABLE.md"
         if doc.exists():
             st.markdown(doc.read_text(encoding="utf-8"))
         else:
             st.info("Guide non monté dans le conteneur.")
-            st.link_button("Ouvrir le guide sur GitHub", f"{_GITHUB_DOCS}/GUIDE_YAML_TABLE.md")
+            st.link_button("Ouvrir sur GitHub", f"{_GITHUB_DOCS}/GUIDE_YAML_TABLE.md")
+    with tab_matrix:
+        doc = _DOCS_DIR / "GUIDE_YAML_MATRIX.md"
+        if doc.exists():
+            st.markdown(doc.read_text(encoding="utf-8"))
+        else:
+            st.info("Guide non monté dans le conteneur.")
+            st.link_button("Ouvrir sur GitHub", f"{_GITHUB_DOCS}/GUIDE_YAML_MATRIX.md")
+    with tab_multi:
+        doc = _DOCS_DIR / "GUIDE_YAML_MULTI_TABLE.md"
+        if doc.exists():
+            st.markdown(doc.read_text(encoding="utf-8"))
+        else:
+            st.info("Guide non monté dans le conteneur.")
+            st.link_button("Ouvrir sur GitHub", f"{_GITHUB_DOCS}/GUIDE_YAML_MULTI_TABLE.md")
     with tab_runbook:
         doc = _DOCS_DIR / "RUNBOOK.md"
         if doc.exists():
             st.markdown(doc.read_text(encoding="utf-8"))
         else:
             st.info("Runbook non monté dans le conteneur.")
-            st.link_button("Ouvrir le runbook sur GitHub", f"{_GITHUB_DOCS}/RUNBOOK.md")
+            st.link_button("Ouvrir sur GitHub", f"{_GITHUB_DOCS}/RUNBOOK.md")
 
 
 def render_exports_view() -> None:

@@ -111,7 +111,37 @@ gery_export:
 
 ---
 
-## 4. Les `transform` disponibles
+## 4. Code article générique Ramery (`ramery_generic_code`)
+
+La colonne **"Article générique associé"** du fichier Gery. Trois façons selon le fichier :
+
+### Cas A — cellule avec texte mélangé (ex. "Code article Ramery 1750")
+```yaml
+file_metadata:
+  ramery_generic_code:
+    cell: "C7"
+    transform: "extract_integer"   # extrait le dernier entier → "1750"
+```
+
+### Cas B — cellule avec le code seul (entier ou texte pur)
+```yaml
+file_metadata:
+  ramery_generic_code:
+    cell: "A8"    # lit la cellule telle quelle
+```
+
+### Cas C — valeur fixe (le fichier ne la contient pas)
+```yaml
+gery_export:
+  defaults:
+    article_generique: "1750"   # fallback si file_metadata ne le fournit pas
+```
+
+> **Priorité** : `file_metadata.ramery_generic_code` > `defaults.article_generique`
+
+---
+
+## 5. Les `transform` disponibles
 À mettre dans `transform:` (un seul, ou une liste `["strip", "to_uppercase"]`) :
 
 | Transform | Usage |
@@ -123,37 +153,38 @@ gery_export:
 | `parse_date_fr` | date **JJ/MM/AAAA** (ex. 01/02/2024) |
 | `parse_date_iso` | date **AAAA-MM-JJ** (ex. 2024-02-01) |
 | `parse_duration_fr` | durée (ex. "2h30") |
+| `extract_integer` | extrait le dernier entier d'un texte quelconque |
 
 `data_type` d'un attribut : `string`, `integer`, `decimal`, `enum`, `duration`, `boolean`.
 
 ---
 
-## 5. Règles d'or (les pièges fréquents)
+## 6. Règles d'or (les pièges fréquents)
 1. **`sheet_match: "auto"`** par défaut — sinon, si le nom d'onglet ne correspond pas exactement, le traitement échoue.
 2. **Dates** : regarde le format dans l'aperçu. `01/02/2024` → **`parse_date_fr`** ; `2024-02-01` → `parse_date_iso`.
 3. **Prix** : presque toujours **`parse_decimal_fr`** (virgule décimale).
 4. **`supplier_product_code` et `designation` sont obligatoires** (`required: true`) — sans eux, la ligne est rejetée.
 5. **Une seule source par colonne** : `source_col` **OU** `constant` **OU** `derived_from`, jamais deux.
-6. **Code Fournisseur SAGE** : il ne se met **PAS** dans le YAML. Il vient du fichier de correspondance `config/sage_codes.csv` (ligne `code_fournisseur,code_sage`).
+6. **Code Fournisseur SAGE** : il ne se met **PAS** dans le YAML. Il vient du fichier `config/sage_codes.csv`.
 7. `row_filter.must_have_value_in` sur une colonne toujours remplie (souvent le code article) évite d'attraper les lignes de total/titre.
 
 ---
 
-## 6. Procédure de bout en bout
-1. Le fichier inconnu arrive → il apparaît dans l'app, onglet **« En attente »**.
-2. Écran de validation : à **droite** l'aperçu (grille A,B,C), à **gauche** l'édition.
-3. Remplis/corrige via le **Formulaire simplifié** (menus déroulants des colonnes) **ou** l'onglet **YAML**.
-   - Doute ? Utilise l'**Assistant IA** : « le prix installateur est en colonne F », « dates en C4/C5 format FR »…
-4. Onglet **« Aperçu export Gery »** → **🔍 Calculer l'aperçu** : vérifie que codes / désignations / prix / dates sont bons.
-5. Quand c'est bon → **✅ Valider**. Le YAML est enregistré dans `config/suppliers/<supplier_code>_v1.yaml`, le fournisseur devient **connu**, et ses prochains fichiers sont traités automatiquement.
+## 7. Procédure de bout en bout
+1. Le fichier inconnu arrive → onglet **« En attente »** dans l'app.
+2. Écran de validation : **droite** = aperçu grille (A, B, C…), **gauche** = édition YAML.
+3. Remplis le YAML (ou utilise le **Formulaire simplifié** ou le bouton **🤖 IA**).
+4. L'**aperçu export Gery** se recalcule sous le fichier brut — vérifie codes / prix / dates.
+5. **✅ Valider** → YAML enregistré dans `config/suppliers/<supplier_code>_v1.yaml`, fournisseur connu, prochains fichiers traités automatiquement.
 
 ---
 
-## 7. Checklist rapide avant de valider
+## 8. Checklist rapide avant de valider
 - [ ] `supplier_code` unique et clair
 - [ ] `sheet_match: "auto"` (ou bon nom d'onglet)
 - [ ] `header_detection.row` et `data_starts_row` corrects
-- [ ] `supplier_product_code` + `designation` mappés (colonnes), `required: true`
-- [ ] prix mappés avec `parse_decimal_fr`, et `price_export_mapping.direct_unit_cost` pointe le bon prix
+- [ ] `supplier_product_code` + `designation` mappés, `required: true`
+- [ ] prix avec `parse_decimal_fr`, `price_export_mapping.direct_unit_cost` pointe le bon prix
 - [ ] dates : bon `transform` (fr vs iso)
-- [ ] l'**Aperçu export Gery** montre des lignes correctes
+- [ ] `ramery_generic_code` renseigné si disponible dans le fichier
+- [ ] l'aperçu export Gery montre des lignes correctes
