@@ -1344,30 +1344,55 @@ with col_preview:
 
     st.divider()
     st.markdown("##### 📤 Aperçu export Gery")
-    _gery_cache = st.session_state.get(f"gery_preview_{pending_id}", {})
-    if _gery_cache:
-        if not _gery_cache.get("export_enabled"):
+
+    _preview_key = f"gery_preview_{pending_id}"
+    _cached = st.session_state.get(_preview_key, {})
+    _cur_yaml = st.session_state[yaml_key]
+    _force = st.session_state.pop(f"force_recalc_{pending_id}", False)
+
+    if st.button("🔄 Recalculer l'aperçu", key=f"recalc_preview_{pending_id}"):
+        st.session_state[f"force_recalc_{pending_id}"] = True
+        st.rerun()
+
+    if _cur_yaml.strip() and (_force or _cached.get("_yaml") != _cur_yaml):
+        with st.spinner("Calcul de l'aperçu…"):
+            _pr = api_post(
+                f"/api/v1/review/{pending_id}/export-preview",
+                {"yaml_content": _cur_yaml},
+            )
+        if _pr.status_code == 200:
+            _pd = _pr.json()
+            _pd["_yaml"] = _cur_yaml
+            st.session_state[_preview_key] = _pd
+            _cached = _pd
+        elif _pr.status_code == 422:
+            st.warning("YAML invalide — corrigez le mapping pour voir l'aperçu.")
+            _cached = {}
+        else:
+            st.warning(f"Aperçu indisponible ({_pr.status_code}).")
+            _cached = {}
+
+    if _cached:
+        if not _cached.get("export_enabled"):
             st.info("Export Gery désactivé pour ce fournisseur.")
-        elif _gery_cache.get("line_count", 0) == 0:
+        elif _cached.get("line_count", 0) == 0:
             st.warning(
-                f"{_gery_cache.get('products_parsed', 0)} produit(s) lus, 0 ligne générée. "
+                f"{_cached.get('products_parsed', 0)} produit(s) lus, 0 ligne générée. "
                 "Vérifiez les colonnes."
             )
         else:
-            st.caption(
-                f"{_gery_cache['line_count']} ligne(s) · {_gery_cache['products_parsed']} produit(s)"
-            )
-            st.dataframe(_gery_cache["rows"], use_container_width=True, hide_index=True)
-    else:
-        st.caption("💡 L'aperçu apparaît ici après avoir enregistré le formulaire ou le YAML.")
+            st.caption(f"{_cached['line_count']} ligne(s) · {_cached['products_parsed']} produit(s)")
+            st.dataframe(_cached["rows"], use_container_width=True, hide_index=True)
+    elif not _cur_yaml.strip():
+        st.caption("💡 Rédigez ou générez un YAML pour voir l'aperçu.")
 
 with col_edit:
-    tab_yaml, tab_form, tab_preview, tab_ai = st.tabs(
-        ["YAML", "Formulaire simplifié", "Aperçu export Gery", "🤖 Assistant IA"]
+    tab_yaml, tab_form, tab_ai = st.tabs(
+        ["YAML", "Formulaire simplifié", "🤖 Assistant IA"]
     )
 
 with tab_yaml:
-    # Chargement depuis un YAML existant du même dossier fournisseur
+    # ── Charger un YAML existant du même dossier ──────────────────────────
     _folder_key = meta["folder_name"].lower()
     try:
         _fm_resp = api_get("/api/v1/suppliers/folder-mapping")
@@ -1376,7 +1401,7 @@ with tab_yaml:
         _folder_yamls = []
 
     if _folder_yamls:
-        _yaml_options = ["— partir de zéro (IA) —"] + [e["supplier_code"] for e in _folder_yamls]
+        _yaml_options = ["— partir de zéro —"] + [e["supplier_code"] for e in _folder_yamls]
         _chosen = st.selectbox(
             "📂 Charger un YAML existant du dossier comme base",
             _yaml_options,
@@ -1394,6 +1419,22 @@ with tab_yaml:
                         st.error(f"Impossible de charger le YAML ({_yr.status_code}).")
                 except Exception as _exc:
                     st.error(f"Erreur : {_exc}")
+
+    # ── Générer le YAML avec l'IA (à la demande) ─────────────────────────
+    if st.button(
+        "🤖 Générer avec l'IA",
+        key=f"gen_ai_{pending_id}",
+        help="Analyse le fichier et génère un mapping YAML automatiquement.",
+    ):
+        with st.spinner("L'IA analyse le fichier…"):
+            _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
+        if _gen_resp.status_code == 200:
+            st.session_state[yaml_key] = _gen_resp.json()["yaml"]
+            st.rerun()
+        elif _gen_resp.status_code == 404:
+            st.error("Fichier source introuvable — impossible de générer le YAML.")
+        else:
+            st.error(f"Erreur IA ({_gen_resp.status_code}) : {_gen_resp.text[:200]}")
 
     st.text_area("Mapping YAML", key=yaml_key, height=500)
     if st.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
@@ -1433,47 +1474,6 @@ with tab_form:
                     st.write(f"- {err}")
             else:
                 st.error(f"Erreur {resp.status_code} : {resp.text}")
-
-with tab_preview:
-    st.caption("Aperçu recalculé automatiquement dès que le YAML change.")
-    _preview_key = f"gery_preview_{pending_id}"
-    _cached = st.session_state.get(_preview_key, {})
-    _cur_yaml = st.session_state[yaml_key]
-
-    if _cached.get("_yaml") != _cur_yaml:
-        with st.spinner("Calcul de l'aperçu Gery…"):
-            _pr = api_post(
-                f"/api/v1/review/{pending_id}/export-preview",
-                {"yaml_content": _cur_yaml},
-            )
-        if _pr.status_code == 200:
-            _pd = _pr.json()
-            _pd["_yaml"] = _cur_yaml
-            st.session_state[_preview_key] = _pd
-            _cached = _pd
-        elif _pr.status_code == 422:
-            st.error("YAML invalide — corrige le mapping pour voir l'aperçu.")
-            for _e in _pr.json().get("detail", []):
-                st.write(f"- {_e}")
-            _cached = {}
-        else:
-            st.error(f"Erreur {_pr.status_code} — aperçu indisponible.")
-            _cached = {}
-
-    if _cached:
-        if not _cached["export_enabled"]:
-            st.info("Export Gery désactivé pour ce fournisseur — aucune ligne générée.")
-        elif _cached["line_count"] == 0:
-            st.warning(
-                f"{_cached['products_parsed']} produit(s) lus, mais 0 ligne d'export. "
-                "Vérifie le mapping (colonnes / type de prix)."
-            )
-        else:
-            st.success(
-                f"{_cached['line_count']} ligne(s) générée(s) à partir de "
-                f"{_cached['products_parsed']} produit(s) lus."
-            )
-            st.dataframe(_cached["rows"], use_container_width=True, hide_index=True)
 
 with tab_ai:
     st.caption(

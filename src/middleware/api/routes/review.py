@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from middleware.ai.yaml_generator import edit_yaml_with_ai, read_excel_preview
+from middleware.ai.yaml_generator import edit_yaml_with_ai, generate_yaml_from_excel, read_excel_preview
 from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
@@ -177,6 +177,42 @@ def export_preview(pending_id: str, request: ExportPreviewRequest) -> dict:
 class AiEditRequest(BaseModel):
     yaml_content: str
     instruction: str
+
+
+@router.get("/review/{pending_id}/generate-yaml", tags=["validation"])
+def generate_yaml_for_pending(pending_id: str) -> dict:
+    """Déclenche la génération IA du YAML pour un fichier en attente (à la demande).
+
+    Met à jour le pending JSON avec le YAML généré et le supplier_guess.
+    """
+    meta = _load_pending(pending_id)
+    if meta["status"] != "pending":
+        raise HTTPException(status_code=409, detail=f"Cette demande a déjà été {meta['status']}.")
+
+    file_path = Path(meta.get("file_path", ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Fichier source introuvable — aperçu impossible.")
+
+    try:
+        from middleware.api.routes.ingest import _inject_sharepoint_folder
+        supplier_guess, yaml_content, initial_prompt = generate_yaml_from_excel(
+            file_path=file_path,
+            folder_name=meta["folder_name"],
+            filename=meta["filename"],
+        )
+        yaml_content = _inject_sharepoint_folder(yaml_content, meta["folder_name"])
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Erreur IA : {exc}") from exc
+
+    meta["yaml_proposed"] = yaml_content
+    meta["supplier_guess"] = supplier_guess
+    meta["initial_prompt"] = initial_prompt
+    (PENDING_DIR / f"{pending_id}.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    logger.info("yaml généré par IA à la demande", pending_id=pending_id, supplier=supplier_guess)
+
+    return {"yaml": yaml_content, "supplier_guess": supplier_guess}
 
 
 @router.post("/review/{pending_id}/ai-edit", tags=["validation"])

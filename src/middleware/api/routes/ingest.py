@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -10,8 +11,8 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from middleware.ai.yaml_generator import generate_yaml_from_excel
 from middleware.core.logging import get_logger
+from middleware.storage.minio_client import upload_raw_file
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -26,7 +27,7 @@ class UnknownIngestRequest(BaseModel):
     folder_name: str
     file_path: str
     pending_id: str | None = None
-    web_url: str | None = None  # lien SharePoint pour ouvrir le fichier en 1 clic
+    web_url: str | None = None
 
 
 class UnknownIngestResponse(BaseModel):
@@ -36,18 +37,13 @@ class UnknownIngestResponse(BaseModel):
 
 
 def _inject_sharepoint_folder(yaml_content: str, folder_name: str) -> str:
-    """Corrige sharepoint_folder dans le YAML avec le vrai dossier SharePoint source.
-
-    Gemini peut deviner un mauvais dossier — on l'écrase avec la valeur réelle
-    issue des métadonnées du fichier. Ajoute aussi filename_keywords vide si absent.
-    """
+    """Corrige sharepoint_folder dans le YAML généré avec le vrai dossier SharePoint source."""
     import re
     folder_line = f'sharepoint_folder: "{folder_name}"'
 
     if re.search(r'^sharepoint_folder:', yaml_content, re.MULTILINE):
         yaml_content = re.sub(r'^sharepoint_folder:.*$', folder_line, yaml_content, flags=re.MULTILINE)
     else:
-        # Insère après la ligne supplier_code
         yaml_content = re.sub(
             r'(^supplier_code:.*$)',
             r'\1\n' + folder_line,
@@ -87,18 +83,16 @@ def _find_pending_for_file(folder_name: str, filename: str) -> dict | None:
 
 
 @router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])
-def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
-    """Reçoit un fichier de fournisseur inconnu, génère un YAML via IA et notifie pour validation."""
+async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
+    """Reçoit un fichier inconnu, l'archive dans MinIO et crée une demande de validation (sans IA)."""
     file_path = Path(request.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
 
-    # Dédup : une demande est déjà en attente pour ce fichier → pas de doublon
-    # (le watcher peut ré-émettre le même fichier à chaque scan tant qu'il est inconnu).
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
     existing = _find_pending_for_file(request.folder_name, request.filename)
     if existing is not None:
-        file_path.unlink(missing_ok=True)  # supprime la copie téléchargée (doublon)
+        file_path.unlink(missing_ok=True)
         logger.info(
             "doublon évité — demande déjà en attente",
             pending_id=existing["id"],
@@ -111,30 +105,12 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
         )
 
     pending_id = request.pending_id or uuid.uuid4().hex
+    supplier_guess = request.folder_name.lower().replace(" ", "_").replace("-", "_")
 
-    initial_prompt = ""
-    try:
-        supplier_guess, yaml_proposed, initial_prompt = generate_yaml_from_excel(
-            file_path=file_path,
-            folder_name=request.folder_name,
-            filename=request.filename,
-        )
-        # Garantit que sharepoint_folder pointe vers le vrai dossier SharePoint source
-        yaml_proposed = _inject_sharepoint_folder(yaml_proposed, request.folder_name)
-    except Exception as exc:
-        logger.error("génération YAML IA échouée", erreur=str(exc))
-        supplier_guess = request.folder_name.lower().replace(" ", "_")
-        yaml_proposed = (
-            f'# Génération automatique échouée : {exc}\n'
-            f'# Complétez ce YAML manuellement.\n'
-            f'supplier_code: "{supplier_guess}"\n'
-            f'sharepoint_folder: "{request.folder_name}"\n'
-            f'filename_keywords: []\n'
-        )
-        initial_prompt = f"(génération échouée : {exc})"
+    # Archive le fichier brut dans MinIO dès la détection
+    content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()[:12]
+    minio_path = await upload_raw_file(file_path, supplier_guess, content_hash)
 
-    # Stocker les métadonnées
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
     meta = {
         "id": pending_id,
         "created_at": datetime.utcnow().isoformat(),
@@ -142,19 +118,24 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
         "folder_name": request.folder_name,
         "file_path": request.file_path,
         "supplier_guess": supplier_guess,
-        "yaml_proposed": yaml_proposed,
-        "initial_prompt": initial_prompt,
+        "yaml_proposed": "",
+        "initial_prompt": "",
         "web_url": request.web_url,
+        "minio_path": minio_path,
         "status": "pending",
     }
     (PENDING_DIR / f"{pending_id}.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    logger.info(
+        "nouveau fichier en attente de validation",
+        pending_id=pending_id,
+        filename=request.filename,
+        folder=request.folder_name,
+        minio_path=minio_path,
+    )
 
     # Notifier n8n
-    approve_url = f"{API_BASE_URL}/api/v1/review/{pending_id}/approve"
-    reject_url = f"{API_BASE_URL}/api/v1/review/{pending_id}/reject"
-
     try:
         httpx.post(
             N8N_WEBHOOK_URL,
@@ -163,9 +144,8 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
                 "filename": request.filename,
                 "folder_name": request.folder_name,
                 "supplier_guess": supplier_guess,
-                "yaml_proposed": yaml_proposed,
-                "approve_url": approve_url,
-                "reject_url": reject_url,
+                "approve_url": f"{API_BASE_URL}/api/v1/review/{pending_id}/approve",
+                "reject_url": f"{API_BASE_URL}/api/v1/review/{pending_id}/reject",
             },
             timeout=10,
         )
@@ -176,5 +156,5 @@ def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
     return UnknownIngestResponse(
         pending_id=pending_id,
         supplier_guess=supplier_guess,
-        message=f"YAML généré pour '{supplier_guess}', en attente de validation humaine.",
+        message=f"Fichier '{request.filename}' en attente de validation.",
     )
