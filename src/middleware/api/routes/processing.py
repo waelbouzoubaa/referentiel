@@ -197,9 +197,6 @@ def _create_anomaly_review(
     issues: list[str],
 ) -> str:
     """Crée une demande de révision manuelle visible dans l'UI de validation."""
-    from ruamel.yaml import YAML as _YAML
-    import io
-
     # Recharge le YAML brut pour l'afficher dans l'UI
     config_dir = Path("config/suppliers")
     yaml_file = config_dir / f"{rule.supplier_code}_v1.yaml"
@@ -208,12 +205,18 @@ def _create_anomaly_review(
     pending_id = uuid.uuid4().hex
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Copie le fichier dans le dossier pending pour qu'il survive à la suppression
+    # du fichier temporaire par le watcher (finally: tmp_path.unlink()).
+    import shutil
+    saved_path = PENDING_DIR / f"{pending_id}{file_path.suffix}"
+    shutil.copy2(file_path, saved_path)
+
     meta = {
         "id": pending_id,
         "created_at": datetime.utcnow().isoformat(),
         "filename": request.original_filename or file_path.name,
         "folder_name": rule.supplier_code,
-        "file_path": str(file_path),
+        "file_path": str(saved_path),
         "supplier_guess": rule.supplier_code,
         "yaml_proposed": yaml_content,
         "initial_prompt": "",
