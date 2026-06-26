@@ -1365,12 +1365,11 @@ with col_preview:
 
     _preview_key = f"gery_preview_{pending_id}"
     _cached = st.session_state.get(_preview_key, {})
-    _cur_yaml = st.session_state[yaml_key]
+    _cur_yaml = st.session_state.get(yaml_key, "")
     _force = st.session_state.pop(f"force_recalc_{pending_id}", False)
 
     if st.button("🔄 Recalculer l'aperçu", key=f"recalc_preview_{pending_id}"):
-        st.session_state[f"force_recalc_{pending_id}"] = True
-        st.rerun()
+        _force = True
 
     if _cur_yaml.strip() and (_force or _cached.get("_yaml") != _cur_yaml):
         with st.spinner("Calcul de l'aperçu…"):
