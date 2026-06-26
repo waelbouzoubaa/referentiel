@@ -312,6 +312,10 @@ def _extract_file_metadata(sheet: Sheet, mapping: FileMetadataMapping) -> FileMe
         meta["organizational_scope"] = _get(mapping.organizational_scope)
     except Exception:
         pass
+    try:
+        meta["ramery_generic_code"] = _get(mapping.ramery_generic_code)
+    except Exception:
+        pass
 
     return FileMetadataPivot(**{k: v for k, v in meta.items() if v is not None})
 

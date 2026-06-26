@@ -31,6 +31,7 @@ TRANSFORMS_VALIDES = [
     "parse_date_fr",
     "parse_date_iso",
     "parse_duration_fr",
+    "extract_integer",
 ]
 
 st.set_page_config(page_title="Validation mappings fournisseurs", layout="wide")

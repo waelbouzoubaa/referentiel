@@ -81,6 +81,7 @@ def generate_gery_exports(
     validity_start: date | None = None,
     validity_end: date | None = None,
     code_fournisseur_sage: str | None = None,
+    ramery_generic_code: str | None = None,
 ) -> GeryExportResult:
     if not export_config.enabled:
         logger.info("gery_export désactivé", supplier_code=supplier_code)
@@ -105,6 +106,7 @@ def generate_gery_exports(
         validity_start,
         validity_end,
         code_fournisseur_sage,
+        ramery_generic_code,
     )
 
     if rows:
@@ -130,6 +132,7 @@ def build_new_article_rows(
     validity_start: date | None = None,
     validity_end: date | None = None,
     code_fournisseur_sage: str | None = None,
+    ramery_generic_code: str | None = None,
 ) -> list[dict[str, Any]]:
     """Construit les lignes NEW_ARTICLE en mémoire (ni fichier ni persistance).
 
@@ -146,6 +149,7 @@ def build_new_article_rows(
         validity_start,
         validity_end,
         code_fournisseur_sage,
+        ramery_generic_code,
     )
     return rows
 
@@ -170,6 +174,7 @@ def _build_rows(
     validity_start: date | None,
     validity_end: date | None,
     code_fournisseur_sage: str | None = None,
+    ramery_generic_code: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[RowDetail]]:
     rows: list[dict[str, Any]] = []
     details: list[RowDetail] = []
@@ -182,7 +187,7 @@ def _build_rows(
                 "Code Fournisseur SAGE": code_fournisseur_sage,
                 "Code article Frns": derived_code,
                 "Description": p.designation,
-                "Article générique associé": defaults.get("article_generique", ""),
+                "Article générique associé": ramery_generic_code or defaults.get("article_generique", ""),
                 "Unité": _resolve_uom(p, defaults),
                 "Starting Date": validity_start.isoformat() if validity_start else None,
                 "Minimum Quantity": defaults.get("minimum_quantity", 1),

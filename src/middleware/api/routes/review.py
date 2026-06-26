@@ -164,6 +164,7 @@ def export_preview(pending_id: str, request: ExportPreviewRequest) -> dict:
         result.file_metadata.validity_start,
         result.file_metadata.validity_end,
         resolve_sage_code(rule.supplier_code),
+        result.file_metadata.ramery_generic_code,
     )
     return {
         "columns": NEW_ARTICLE_COLS,

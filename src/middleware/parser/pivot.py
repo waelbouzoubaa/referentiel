@@ -80,6 +80,7 @@ class FileMetadataPivot(BaseModel):
     contract_reference: str | None = None
     geographic_scope: str | None = None
     organizational_scope: str | None = None
+    ramery_generic_code: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

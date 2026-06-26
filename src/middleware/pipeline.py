@@ -93,6 +93,7 @@ async def process_and_export(
         validity_start=result.file_metadata.validity_start,
         validity_end=result.file_metadata.validity_end,
         code_fournisseur_sage=resolve_sage_code(rule.supplier_code),
+        ramery_generic_code=result.file_metadata.ramery_generic_code,
     )
 
     await persist_gery_export(session, export_result, supplier.id, supplier_file.id)

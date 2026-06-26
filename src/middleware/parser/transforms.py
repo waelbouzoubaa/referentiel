@@ -58,6 +58,9 @@ def _apply_single(value: Any, transform: str) -> Any:
             return _parse_decimal_us(s)
         case "parse_duration_fr":
             return _parse_duration_fr(s)
+        case "extract_integer":
+            matches = re.findall(r"\d+", s)
+            return matches[-1] if matches else None
         case _:
             if transform.startswith("regex_extract:"):
                 pattern = transform.split(":", 1)[1].strip("'\"")
