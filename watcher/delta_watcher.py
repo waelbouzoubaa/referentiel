@@ -224,6 +224,7 @@ def _handle_unknown_supplier(item):
                 "file_path": str(file_path),
                 "pending_id": pending_id,
                 "web_url": item.get("webUrl"),
+                "sharepoint_item_id": item.get("id"),
             },
             timeout=120,
         )

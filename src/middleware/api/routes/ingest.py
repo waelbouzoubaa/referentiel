@@ -28,6 +28,7 @@ class UnknownIngestRequest(BaseModel):
     file_path: str
     pending_id: str | None = None
     web_url: str | None = None
+    sharepoint_item_id: str | None = None
 
 
 class UnknownIngestResponse(BaseModel):
@@ -64,8 +65,13 @@ def _inject_sharepoint_folder(yaml_content: str, folder_name: str) -> str:
     return yaml_content
 
 
-def _find_pending_for_file(folder_name: str, filename: str) -> dict | None:
-    """Retourne une demande déjà 'pending' pour ce (dossier, fichier), sinon None."""
+def _find_pending_for_file(
+    folder_name: str, filename: str, sharepoint_item_id: str | None = None
+) -> dict | None:
+    """Retourne une demande déjà 'pending' pour ce fichier, sinon None.
+
+    Priorité à l'item ID SharePoint (clé stable), fallback sur (dossier, nom).
+    """
     if not PENDING_DIR.exists():
         return None
     for meta_path in PENDING_DIR.glob("*.json"):
@@ -73,9 +79,12 @@ def _find_pending_for_file(folder_name: str, filename: str) -> dict | None:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
             continue
+        if data.get("status") != "pending":
+            continue
+        if sharepoint_item_id and data.get("sharepoint_item_id") == sharepoint_item_id:
+            return data
         if (
-            data.get("status") == "pending"
-            and data.get("folder_name") == folder_name
+            data.get("folder_name") == folder_name
             and data.get("filename") == filename
         ):
             return data
@@ -90,7 +99,7 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
 
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    existing = _find_pending_for_file(request.folder_name, request.filename)
+    existing = _find_pending_for_file(request.folder_name, request.filename, request.sharepoint_item_id)
     if existing is not None:
         file_path.unlink(missing_ok=True)
         logger.info(
@@ -121,6 +130,7 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
         "yaml_proposed": "",
         "initial_prompt": "",
         "web_url": request.web_url,
+        "sharepoint_item_id": request.sharepoint_item_id,
         "minio_path": minio_path,
         "status": "pending",
     }
