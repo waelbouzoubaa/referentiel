@@ -178,10 +178,11 @@ def render_help_view() -> None:
     """Vue d'aide : affiche les guides (création de YAML + runbook) dans l'app."""
     st.subheader("❓ Aide")
     st.caption("Guides pour créer les mappings et opérer le système.")
-    tab_table, tab_matrix, tab_multi, tab_runbook = st.tabs([
+    tab_table, tab_matrix, tab_multi, tab_atlantic, tab_runbook = st.tabs([
         "📋 Table simple (Atlantic…)",
         "🔢 Matrix (Airisol…)",
         "📑 Multi-table (Agenor…)",
+        "✅ Exemple réel — Atlantic",
         "🛠️ Runbook",
     ])
     with tab_table:
@@ -205,6 +206,13 @@ def render_help_view() -> None:
         else:
             st.info("Guide non monté dans le conteneur.")
             st.link_button("Ouvrir sur GitHub", f"{_GITHUB_DOCS}/GUIDE_YAML_MULTI_TABLE.md")
+    with tab_atlantic:
+        doc = _DOCS_DIR / "EXAMPLE_ATLANTIC.md"
+        if doc.exists():
+            st.markdown(doc.read_text(encoding="utf-8"))
+        else:
+            st.info("Exemple non monté dans le conteneur.")
+            st.link_button("Ouvrir sur GitHub", f"{_GITHUB_DOCS}/EXAMPLE_ATLANTIC.md")
     with tab_runbook:
         doc = _DOCS_DIR / "RUNBOOK.md"
         if doc.exists():
