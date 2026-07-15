@@ -119,6 +119,7 @@ class FileMetadataMapping(BaseModel):
     client_article_code: CellExtraction | None = None
     validity_period: CellExtraction | None = None
     ramery_generic_code: CellExtraction | None = None
+    siren_fournisseur: CellExtraction | None = None
 
 
 # ── Config export Gery ────────────────────────────────────────────────────────

@@ -66,6 +66,7 @@ NEW_ARTICLE_COLS = [
     "Minimum Quantity",
     "Direct Unit Cost",
     "Ending Date",
+    "SIREN Fournisseur",
 ]
 
 
@@ -82,6 +83,7 @@ def generate_gery_exports(
     validity_end: date | None = None,
     code_fournisseur_sage: str | None = None,
     ramery_generic_code: str | None = None,
+    siren_fournisseur: str | None = None,
 ) -> GeryExportResult:
     if not export_config.enabled:
         logger.info("gery_export désactivé", supplier_code=supplier_code)
@@ -107,6 +109,7 @@ def generate_gery_exports(
         validity_end,
         code_fournisseur_sage,
         ramery_generic_code,
+        siren_fournisseur,
     )
 
     if rows:
@@ -133,6 +136,7 @@ def build_new_article_rows(
     validity_end: date | None = None,
     code_fournisseur_sage: str | None = None,
     ramery_generic_code: str | None = None,
+    siren_fournisseur: str | None = None,
 ) -> list[dict[str, Any]]:
     """Construit les lignes NEW_ARTICLE en mémoire (ni fichier ni persistance).
 
@@ -150,6 +154,7 @@ def build_new_article_rows(
         validity_end,
         code_fournisseur_sage,
         ramery_generic_code,
+        siren_fournisseur,
     )
     return rows
 
@@ -175,6 +180,7 @@ def _build_rows(
     validity_end: date | None,
     code_fournisseur_sage: str | None = None,
     ramery_generic_code: str | None = None,
+    siren_fournisseur: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[RowDetail]]:
     rows: list[dict[str, Any]] = []
     details: list[RowDetail] = []
@@ -193,6 +199,7 @@ def _build_rows(
                 "Minimum Quantity": defaults.get("minimum_quantity", 1),
                 "Direct Unit Cost": float(price.amount) if price else None,
                 "Ending Date": validity_end.isoformat() if validity_end else None,
+                "SIREN Fournisseur": siren_fournisseur,
             }
             rows.append(row)
             details.append(RowDetail(

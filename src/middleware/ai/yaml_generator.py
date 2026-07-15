@@ -382,6 +382,15 @@ ou simplement un nombre seul qui représente un code Ramery.
       cell: "A8"
 - Si tu ne trouves pas cette cellule → omets la clé ramery_generic_code (ne l'invente pas).
 
+## SIREN Fournisseur (optionnel — cherche mais n'invente jamais) :
+Certains cartouches contiennent le SIREN du fournisseur (9 chiffres, parfois précédé de
+"SIREN", "N° SIREN", "SIRET"...). Si tu le trouves clairement :
+    siren_fournisseur:
+      cell: "C8"
+- Si le texte est mélangé (ex. "SIREN : 123456789") : ajoute `transform: "extract_integer"`.
+- Si tu ne le trouves PAS dans le fichier → omets simplement la clé (ne l'invente pas,
+  ne mets pas de valeur au hasard). C'est normal que ce champ soit absent selon le fournisseur.
+
 ## Règle impérative sur les regex dans file_metadata :
 Pour toute valeur regex, utilise TOUJOURS des guillemets simples YAML ('...')
 sauf si la regex contient elle-même une apostrophe (ex : "l'offre") — dans ce
@@ -438,6 +447,8 @@ Applique cette demande en modifiant le YAML. Contraintes :
 - Dates JJ/MM/AAAA → parse_date_fr ; dates AAAA-MM-JJ → parse_date_iso.
 - ramery_generic_code dans file_metadata : transform "extract_integer" si la cellule
   contient du texte mixte ("Code article Ramery 1750" → "1750"), sans transform si c'est juste un chiffre.
+- siren_fournisseur dans file_metadata : optionnel, uniquement si le cartouche le contient
+  clairement (n'invente jamais une valeur).
 - Pour les regex : guillemets simples ('...') sauf si la regex contient une apostrophe
   (dans ce cas guillemets doubles avec \\\\ pour chaque backslash).
 

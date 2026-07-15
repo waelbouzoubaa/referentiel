@@ -417,7 +417,8 @@ def _extract_file_metadata_multi(sheet: Sheet, mapping: FileMetadataMapping) -> 
 
     # Champs standards
     for field in ("validity_start", "validity_end", "contract_reference",
-                  "geographic_scope", "organizational_scope", "client_article_code"):
+                  "geographic_scope", "organizational_scope", "client_article_code",
+                  "siren_fournisseur"):
         extraction = getattr(mapping, field, None)
         if extraction is not None:
             try:

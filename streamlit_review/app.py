@@ -1409,6 +1409,8 @@ with col_preview:
                 _meta_parts.append(f"**Code générique Ramery :** `{_fm['ramery_generic_code']}`")
             else:
                 _meta_parts.append("**Code générique Ramery :** ⚠️ *non trouvé — vérifiez la cellule dans file_metadata*")
+            if _fm.get("siren_fournisseur"):
+                _meta_parts.append(f"**SIREN Fournisseur :** `{_fm['siren_fournisseur']}`")
             if _fm.get("validity_start"):
                 _meta_parts.append(f"**Validité :** {_fm['validity_start']} → {_fm.get('validity_end', '?')}")
             if _fm.get("contract_reference"):

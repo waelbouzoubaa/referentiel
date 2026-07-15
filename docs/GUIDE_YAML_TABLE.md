@@ -141,6 +141,23 @@ gery_export:
 
 ---
 
+## 4bis. SIREN Fournisseur (`siren_fournisseur`) — optionnel
+
+La colonne **"SIREN Fournisseur"** (dernière colonne du CSV Gery). Présent seulement dans
+certains fichiers — s'il n'est pas dans le cartouche, **on laisse la colonne vide**, pas de
+valeur par défaut à inventer.
+
+```yaml
+file_metadata:
+  siren_fournisseur:
+    cell: "C8"                     # lit la cellule telle quelle
+    # transform: "extract_integer"  # si la cellule mélange texte et chiffres
+```
+
+Si le fichier ne contient pas le SIREN : n'ajoute simplement pas la clé `siren_fournisseur`.
+
+---
+
 ## 5. Les `transform` disponibles
 À mettre dans `transform:` (un seul, ou une liste `["strip", "to_uppercase"]`) :
 
@@ -187,4 +204,5 @@ gery_export:
 - [ ] prix avec `parse_decimal_fr`, `price_export_mapping.direct_unit_cost` pointe le bon prix
 - [ ] dates : bon `transform` (fr vs iso)
 - [ ] `ramery_generic_code` renseigné si disponible dans le fichier
+- [ ] `siren_fournisseur` renseigné si le cartouche le contient (sinon colonne vide, normal)
 - [ ] l'aperçu export Gery montre des lignes correctes
