@@ -370,17 +370,24 @@ Respecte EXACTEMENT la structure des exemples ci-dessous.
 - gery_export.enabled = false → blocked_reason obligatoire
 
 ## Code article générique Ramery (OBLIGATOIRE à chercher) :
-Cherche TOUJOURS dans le cartouche (lignes 1-10 environ) une cellule contenant
-un texte du type "Code article Ramery 1750", "Article générique 1480", "Réf. Ramery 1234"
-ou simplement un nombre seul qui représente un code Ramery.
-- Si la cellule contient un TEXTE MIXTE (ex. "Code article Ramery 1750") :
-    ramery_generic_code:
-      cell: "A8"
-      transform: "extract_integer"
-- Si la cellule contient UNIQUEMENT le code numérique (ex. "1750") :
-    ramery_generic_code:
-      cell: "A8"
-- Si tu ne trouves pas cette cellule → omets la clé ramery_generic_code (ne l'invente pas).
+Deux formes possibles — regarde d'abord si c'est une COLONNE (une valeur différente par ligne
+de produit, ex. en-tête "code ramery article générique" au-dessus des lignes de données), sinon
+cherche une cellule UNIQUE dans le cartouche (lignes 1-10 environ, ex. "Code article Ramery 1750").
+
+- **Colonne dédiée (une valeur par produit)** → mappe comme une colonne normale :
+    columns:
+      generic_code:
+        source_col: "A"
+- **Cellule cartouche, texte mixte** (ex. "Code article Ramery 1750") :
+    file_metadata:
+      ramery_generic_code:
+        cell: "A8"
+        transform: "extract_integer"
+- **Cellule cartouche, code seul** (ex. "1750") :
+    file_metadata:
+      ramery_generic_code:
+        cell: "A8"
+- Si tu ne trouves ni colonne ni cellule → omets les deux clés (ne l'invente pas).
 
 ## SIREN Fournisseur (optionnel — cherche mais n'invente jamais) :
 Certains cartouches contiennent le SIREN du fournisseur (9 chiffres, parfois précédé de
@@ -445,7 +452,9 @@ Applique cette demande en modifiant le YAML. Contraintes :
 - Garde la même grammaire (ne change pas extraction_mode sauf si demandé, n'invente pas de clés).
 - transforms autorisés uniquement : {transforms_list}
 - Dates JJ/MM/AAAA → parse_date_fr ; dates AAAA-MM-JJ → parse_date_iso.
-- ramery_generic_code dans file_metadata : transform "extract_integer" si la cellule
+- Code article générique : si c'est une colonne (valeur différente par ligne), mappe
+  columns.generic_code (source_col). Si c'est une cellule unique du cartouche, utilise
+  ramery_generic_code dans file_metadata avec transform "extract_integer" si la cellule
   contient du texte mixte ("Code article Ramery 1750" → "1750"), sans transform si c'est juste un chiffre.
 - siren_fournisseur dans file_metadata : optionnel, uniquement si le cartouche le contient
   clairement (n'invente jamais une valeur).

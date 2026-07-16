@@ -416,13 +416,18 @@ def _extract_file_metadata_multi(sheet: Sheet, mapping: FileMetadataMapping) -> 
         return None
 
     # Champs standards
+    _str_fields = {"contract_reference", "geographic_scope", "organizational_scope",
+                   "client_article_code", "siren_fournisseur"}
     for field in ("validity_start", "validity_end", "contract_reference",
                   "geographic_scope", "organizational_scope", "client_article_code",
                   "siren_fournisseur"):
         extraction = getattr(mapping, field, None)
         if extraction is not None:
             try:
-                meta[field] = _get(extraction)
+                value = _get(extraction)
+                if field in _str_fields and value is not None:
+                    value = str(value)
+                meta[field] = value
             except Exception:
                 pass
 

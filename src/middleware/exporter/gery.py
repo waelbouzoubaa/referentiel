@@ -193,7 +193,9 @@ def _build_rows(
                 "Code Fournisseur SAGE": code_fournisseur_sage,
                 "Code article Frns": derived_code,
                 "Description": p.designation,
-                "Article générique associé": ramery_generic_code or defaults.get("article_generique", ""),
+                "Article générique associé": (
+                    p.generic_code or ramery_generic_code or defaults.get("article_generique", "")
+                ),
                 "Unité": _resolve_uom(p, defaults),
                 "Starting Date": validity_start.isoformat() if validity_start else None,
                 "Minimum Quantity": defaults.get("minimum_quantity", 1),

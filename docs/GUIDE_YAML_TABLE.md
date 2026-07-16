@@ -111,11 +111,24 @@ gery_export:
 
 ---
 
-## 4. Code article générique Ramery (`ramery_generic_code`)
+## 4. Code article générique Ramery
 
-La colonne **"Article générique associé"** du fichier Gery. Trois façons selon le fichier :
+La colonne **"Article générique associé"** du fichier Gery. **D'abord regarder si le fichier
+a une colonne dédiée** (le code varie ligne par ligne, ex. Altema) — sinon, c'est une valeur
+unique dans le cartouche (`ramery_generic_code`). Quatre façons selon le fichier :
 
-### Cas A — cellule avec texte mélangé (ex. "Code article Ramery 1750")
+### Cas A — colonne dédiée, une valeur différente par produit (ex. Altema)
+Le fichier a une colonne entière "code ramery article générique" avec une valeur par ligne
+(1540, 1450...). Se mappe comme n'importe quelle autre colonne produit :
+```yaml
+columns:
+  generic_code:
+    source_col: "A"
+```
+Un changement de valeur dans cette colonne (d'un fichier à l'autre) est traité comme une
+mise à jour du produit (déclenche un re-export).
+
+### Cas B — cellule cartouche avec texte mélangé (ex. "Code article Ramery 1750")
 ```yaml
 file_metadata:
   ramery_generic_code:
@@ -123,21 +136,24 @@ file_metadata:
     transform: "extract_integer"   # extrait le dernier entier → "1750"
 ```
 
-### Cas B — cellule avec le code seul (entier ou texte pur)
+### Cas C — cellule cartouche avec le code seul (entier ou texte pur)
 ```yaml
 file_metadata:
   ramery_generic_code:
     cell: "A8"    # lit la cellule telle quelle
 ```
 
-### Cas C — valeur fixe (le fichier ne la contient pas)
+### Cas D — valeur fixe (le fichier ne la contient nulle part)
 ```yaml
 gery_export:
   defaults:
-    article_generique: "1750"   # fallback si file_metadata ne le fournit pas
+    article_generique: "1750"   # fallback si ni colonne ni file_metadata ne le fournissent
 ```
 
-> **Priorité** : `file_metadata.ramery_generic_code` > `defaults.article_generique`
+> **Priorité** : `columns.generic_code` (par produit) > `file_metadata.ramery_generic_code`
+> (cartouche, fichier entier) > `defaults.article_generique` (valeur fixe YAML)
+>
+> `columns.generic_code` n'existe qu'en mode `table` pour l'instant (pas encore `matrix`/`multi_table`).
 
 ---
 
@@ -203,6 +219,6 @@ Si le fichier ne contient pas le SIREN : n'ajoute simplement pas la clé `siren_
 - [ ] `supplier_product_code` + `designation` mappés, `required: true`
 - [ ] prix avec `parse_decimal_fr`, `price_export_mapping.direct_unit_cost` pointe le bon prix
 - [ ] dates : bon `transform` (fr vs iso)
-- [ ] `ramery_generic_code` renseigné si disponible dans le fichier
+- [ ] Code article générique renseigné (colonne `generic_code` si elle varie par ligne, sinon `ramery_generic_code` dans le cartouche)
 - [ ] `siren_fournisseur` renseigné si le cartouche le contient (sinon colonne vide, normal)
 - [ ] l'aperçu export Gery montre des lignes correctes

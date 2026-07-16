@@ -162,13 +162,18 @@ def _extract_product(
         supplier_product_code=str(fields.get("supplier_product_code", "")),
         designation=str(fields.get("designation", "")),
         product_kind=fields.get("product_kind", "physical"),
-        family=fields.get("family"),
-        subfamily=fields.get("subfamily"),
-        generic_code=fields.get("generic_code"),
+        family=_str_or_none(fields.get("family")),
+        subfamily=_str_or_none(fields.get("subfamily")),
+        generic_code=_str_or_none(fields.get("generic_code")),
         prices=prices,
         attributes=attributes,
         source_row=row_number,
     )
+
+
+def _str_or_none(value: Any) -> str | None:
+    """Coerce une valeur de colonne (parfois lue comme int/float par openpyxl) en str."""
+    return None if value is None else str(value)
 
 
 def _extract_column_value(row: Row, mapping: ColumnMapping) -> Any:
@@ -313,11 +318,13 @@ def _extract_file_metadata(sheet: Sheet, mapping: FileMetadataMapping) -> FileMe
     except Exception:
         pass
     try:
-        meta["ramery_generic_code"] = _get(mapping.ramery_generic_code)
+        value = _get(mapping.ramery_generic_code)
+        meta["ramery_generic_code"] = str(value) if value is not None else None
     except Exception:
         pass
     try:
-        meta["siren_fournisseur"] = _get(mapping.siren_fournisseur)
+        value = _get(mapping.siren_fournisseur)
+        meta["siren_fournisseur"] = str(value) if value is not None else None
     except Exception:
         pass
 
@@ -339,6 +346,7 @@ def compute_business_hash(product: ProductPivot) -> str:
             "designation": product.designation.strip().upper(),
             "family": (product.family or "").strip().upper(),
             "subfamily": (product.subfamily or "").strip().upper(),
+            "generic_code": (product.generic_code or "").strip().upper(),
             "prices": sorted(
                 [
                     (p.price_type, str(p.amount), p.currency, str(p.tier_min_quantity), str(p.tier_max_quantity))
@@ -367,6 +375,7 @@ def compute_business_hash_no_prices(product: ProductPivot) -> str:
             "designation": product.designation.strip().upper(),
             "family": (product.family or "").strip().upper(),
             "subfamily": (product.subfamily or "").strip().upper(),
+            "generic_code": (product.generic_code or "").strip().upper(),
             "attributes": sorted(
                 [(a.key, a.value, a.unit or "") for a in product.attributes]
             ),
