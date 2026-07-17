@@ -782,6 +782,7 @@ def render_table_form_simple(
     pending_id: str,
     columns: list[tuple[str, str]],
     sheets: list[str],
+    supplier_guess: str = "",
 ) -> dict[str, Any]:
     """Formulaire orienté métier : associe chaque colonne Gery à sa source dans le fichier.
 
@@ -831,10 +832,15 @@ def render_table_form_simple(
         help="La ligne juste au-dessus est utilisée comme ligne d'en-têtes.",
     )
     supplier_code = st.text_input(
-        "Code fournisseur (identifiant interne, sans espace ni accent)",
-        value=data.get("supplier_code", ""),
+        "Code fournisseur *(obligatoire — identifiant interne, sans espace ni accent)*",
+        value=data.get("supplier_code") or supplier_guess or "",
         key=f"supplier_code_simple_{pending_id}",
     )
+    if not supplier_code.strip():
+        st.warning(
+            "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés "
+            "tant que ce champ n'est pas rempli."
+        )
 
     st.divider()
     st.markdown("##### 🧾 Colonnes de l'export Gery")
@@ -1935,7 +1941,8 @@ with tab_simple:
         )
         _detected_cols_simple = parse_detected_columns(preview_text, int(_guess_header_row) - 1)
         _new_mapping_simple = render_table_form_simple(
-            _sd, pending_id, _detected_cols_simple, sheets_list
+            _sd, pending_id, _detected_cols_simple, sheets_list,
+            supplier_guess=meta.get("supplier_guess", ""),
         )
         _new_yaml_simple = dump_yaml(_new_mapping_simple)
         if _new_yaml_simple != st.session_state.get(yaml_content_key):
