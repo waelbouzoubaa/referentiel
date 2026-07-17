@@ -14,6 +14,7 @@ from middleware.core.logging import get_logger
 from middleware.db.session import get_session
 from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import NEW_ARTICLE_COLS, build_new_article_rows
+from middleware.parser.excel_reader import list_sheet_names
 from middleware.parser.yaml_loader import validate_mapping_yaml
 from middleware.pipeline import parse_with_rule, process_and_export
 from middleware.sage_codes import resolve_sage_code
@@ -107,13 +108,30 @@ def update_pending_yaml(pending_id: str, request: UpdateYamlRequest) -> UpdateYa
 
 
 @router.get("/review/{pending_id}/preview", tags=["validation"])
-def get_pending_preview(pending_id: str) -> dict:
-    """Retourne un aperçu texte du fichier Excel source."""
+def get_pending_preview(pending_id: str, sheet: str | None = None) -> dict:
+    """Retourne un aperçu texte du fichier Excel source.
+
+    Args:
+        sheet: Onglet à prévisualiser. Si absent, prévisualise l'onglet actif du classeur.
+    """
     meta = _load_pending(pending_id)
     file_path = Path(meta.get("file_path", ""))
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier source introuvable : {file_path}")
-    return {"preview": read_excel_preview(file_path)}
+    return {"preview": read_excel_preview(file_path, sheet_name=sheet)}
+
+
+@router.get("/review/{pending_id}/sheets", tags=["validation"])
+def get_pending_sheets(pending_id: str) -> dict:
+    """Retourne la liste des onglets du fichier Excel source."""
+    meta = _load_pending(pending_id)
+    file_path = Path(meta.get("file_path", ""))
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Fichier source introuvable : {file_path}")
+    try:
+        return {"sheets": list_sheet_names(file_path)}
+    except ParsingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/review/{pending_id}/source-file", tags=["validation"])

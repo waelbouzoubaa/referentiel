@@ -84,6 +84,33 @@ def _read_with_openpyxl(path: Path, sheet_name: str | None) -> dict[str, Sheet]:
     return sheets
 
 
+def list_sheet_names(path: Path) -> list[str]:
+    """Retourne les noms des onglets d'un classeur Excel, sans charger les données.
+
+    Raises:
+        ParsingError: Si le fichier est illisible.
+    """
+    if not path.exists():
+        raise ParsingError(f"Fichier introuvable : {path}", filename=path.name)
+
+    try:
+        from python_calamine import CalamineWorkbook
+
+        return list(CalamineWorkbook.from_path(str(path)).sheet_names)
+    except ImportError:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(path, read_only=True)
+        names = list(wb.sheetnames)
+        wb.close()
+        return names
+    except Exception as exc:
+        raise ParsingError(
+            f"Erreur de lecture calamine ({path.name}) : {exc}",
+            filename=path.name,
+        ) from exc
+
+
 def find_sheet(sheets: dict[str, Sheet], sheet_match: str | dict[str, str]) -> tuple[str, Sheet]:
     """Trouve la feuille correspondant à sheet_match.
 

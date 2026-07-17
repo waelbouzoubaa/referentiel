@@ -157,11 +157,23 @@ def fetch_detail(pending_id: str) -> dict[str, Any]:
     return resp.json()
 
 
-def fetch_preview(pending_id: str) -> str:
-    resp = api_get(f"/api/v1/review/{pending_id}/preview")
+def fetch_preview(pending_id: str, sheet: str | None = None) -> str:
+    from urllib.parse import quote
+
+    path = f"/api/v1/review/{pending_id}/preview"
+    if sheet:
+        path += f"?sheet={quote(sheet)}"
+    resp = api_get(path)
     if resp.status_code != 200:
         return f"(Aperçu indisponible : {resp.text})"
     return resp.json().get("preview", "")
+
+
+def fetch_sheets(pending_id: str) -> list[str]:
+    resp = api_get(f"/api/v1/review/{pending_id}/sheets")
+    if resp.status_code != 200:
+        return []
+    return resp.json().get("sheets", [])
 
 
 def fetch_export_bytes(pending_id: str, filename: str) -> bytes:
@@ -687,6 +699,385 @@ def render_table_form(
         result["file_metadata"] = new_file_metadata
     result["gery_export"] = new_gery_export
 
+    return result
+
+
+# ─── Formulaire simplifié v2 — orienté métier, sans YAML (mode table) ──────
+
+_SRC_COLUMN = "Colonne du fichier"
+_SRC_CELL = "Cellule unique (cartouche)"
+_SRC_FIXED = "Valeur fixe"
+_SRC_NONE = "Non renseigné"
+
+
+def _column_choices(columns: list[tuple[str, str]]) -> tuple[list[str], dict[str, str]]:
+    """Options de liste déroulante 'lettre — en-tête' → lettre de colonne."""
+    labels: list[str] = []
+    by_label: dict[str, str] = {}
+    for letter, header in columns:
+        label = f"{letter} — {header}" if header else letter
+        labels.append(label)
+        by_label[label] = letter
+    return labels, by_label
+
+
+def _pick_column_widget(container, label, columns, current, key):
+    """Liste déroulante de colonne détectée (repli en texte libre si aucune détectée)."""
+    labels, by_label = _column_choices(columns)
+    if not labels:
+        return container.text_input(label, value=current or "", key=key)
+    default_label = next((lbl for lbl, ltr in by_label.items() if ltr == current), labels[0])
+    idx = labels.index(default_label) if default_label in labels else 0
+    chosen = container.selectbox(label, labels, index=idx, key=key)
+    return by_label[chosen]
+
+
+def _source_field(
+    gery_label: str,
+    help_text: str,
+    pending_id: str,
+    field_id: str,
+    allowed_sources: list[str],
+    columns: list[tuple[str, str]],
+    current_source: str,
+    current_value: str,
+    extra_render=None,
+):
+    """Bloc 'nom de colonne Gery + sélecteur de source + champ dépendant'.
+
+    Returns:
+        (type_source, valeur, extra) — extra = résultat de extra_render (ex: format de date).
+    """
+    st.markdown(f"**{gery_label}**")
+    if help_text:
+        st.caption(help_text)
+    left, right = st.columns([1, 2])
+    idx = allowed_sources.index(current_source) if current_source in allowed_sources else 0
+    source = left.selectbox(
+        "Source", allowed_sources, index=idx,
+        key=f"{field_id}_src_{pending_id}", label_visibility="collapsed",
+    )
+    value = ""
+    extra = None
+    if source == _SRC_COLUMN:
+        value = _pick_column_widget(
+            right, "Colonne", columns, current_value, key=f"{field_id}_col_{pending_id}"
+        )
+    elif source == _SRC_CELL:
+        value = right.text_input(
+            "Cellule (ex: C4)", value=current_value, key=f"{field_id}_cell_{pending_id}"
+        )
+        if extra_render:
+            extra = extra_render(right, field_id)
+    elif source == _SRC_FIXED:
+        value = right.text_input(
+            "Valeur", value=current_value, key=f"{field_id}_fixed_{pending_id}"
+        )
+    st.divider()
+    return source, value.strip() if isinstance(value, str) else value, extra
+
+
+def render_table_form_simple(
+    data: dict[str, Any],
+    pending_id: str,
+    columns: list[tuple[str, str]],
+    sheets: list[str],
+) -> dict[str, Any]:
+    """Formulaire orienté métier : associe chaque colonne Gery à sa source dans le fichier.
+
+    Contrairement à `render_table_form`, aucune connaissance YAML n'est requise — que
+    des listes déroulantes basées sur les colonnes réellement détectées. Retourne le
+    mapping reconstruit à CHAQUE interaction (pas de bouton "Enregistrer") pour piloter
+    un aperçu qui se met à jour en direct.
+    """
+    st.caption(
+        "Pour chaque colonne de l'export Gery, indique d'où vient la valeur dans le "
+        "fichier fournisseur. L'aperçu à droite se met à jour automatiquement."
+    )
+
+    existing_columns = data.get("columns") or {}
+    file_metadata = data.get("file_metadata") or {}
+    gery_export = data.get("gery_export") or {}
+    defaults = gery_export.get("defaults") or {}
+    attributes = data.get("attributes") or []
+    unit_attr = next((a for a in attributes if a and a.get("key") == "unit_of_measure"), {})
+    prices = data.get("prices") or []
+    price_export_mapping = gery_export.get("price_export_mapping") or {}
+    current_price_type = price_export_mapping.get("direct_unit_cost")
+    current_price = next(
+        (p for p in prices if p.get("type") == current_price_type), (prices[0] if prices else {})
+    )
+
+    # ── Repérage dans le fichier ────────────────────────────────────────────
+    st.markdown("##### 📍 Où sont les données dans le fichier ?")
+    c1, c2 = st.columns(2)
+    current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
+    sheet_options = sheets or ([current_sheet] if current_sheet else [])
+    if sheet_options:
+        idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
+        sheet_match = c1.selectbox(
+            "Feuille Excel", sheet_options, index=idx, key=f"sheet_simple_{pending_id}"
+        )
+    else:
+        sheet_match = c1.text_input(
+            "Feuille Excel", value=current_sheet or "", key=f"sheet_simple_{pending_id}"
+        )
+
+    data_starts_row = c2.number_input(
+        "À quelle ligne commencent les produits ?",
+        min_value=2, step=1,
+        value=int(data.get("data_starts_row") or 2),
+        key=f"data_starts_simple_{pending_id}",
+        help="La ligne juste au-dessus est utilisée comme ligne d'en-têtes.",
+    )
+    supplier_code = st.text_input(
+        "Code fournisseur (identifiant interne, sans espace ni accent)",
+        value=data.get("supplier_code", ""),
+        key=f"supplier_code_simple_{pending_id}",
+    )
+
+    st.divider()
+    st.markdown("##### 🧾 Colonnes de l'export Gery")
+
+    st.markdown("**Code Fournisseur SAGE**")
+    st.caption("🔒 Résolu automatiquement à partir du code fournisseur — non modifiable ici.")
+    st.divider()
+
+    _, code_col, _ = _source_field(
+        "Code article Frns *(obligatoire)*", "",
+        pending_id, "supplier_product_code", [_SRC_COLUMN], columns,
+        _SRC_COLUMN, (existing_columns.get("supplier_product_code") or {}).get("source_col") or "",
+    )
+
+    _, designation_col, _ = _source_field(
+        "Description *(obligatoire)*", "",
+        pending_id, "designation", [_SRC_COLUMN], columns,
+        _SRC_COLUMN, (existing_columns.get("designation") or {}).get("source_col") or "",
+    )
+
+    generic_current = (
+        (_SRC_COLUMN, (existing_columns.get("generic_code") or {}).get("source_col") or "")
+        if existing_columns.get("generic_code") else
+        (_SRC_CELL, (file_metadata.get("ramery_generic_code") or {}).get("cell") or "")
+        if file_metadata.get("ramery_generic_code") else
+        (_SRC_FIXED, defaults.get("article_generique") or "")
+        if defaults.get("article_generique") else
+        (_SRC_NONE, "")
+    )
+    generic_src, generic_val, _ = _source_field(
+        "Article générique associé",
+        "Variable selon le produit (colonne) ou fixe pour tout le fichier (cartouche / valeur).",
+        pending_id, "generic", [_SRC_COLUMN, _SRC_CELL, _SRC_FIXED, _SRC_NONE], columns,
+        generic_current[0], generic_current[1],
+    )
+
+    unit_current = (
+        (_SRC_COLUMN, unit_attr.get("source_col") or "")
+        if unit_attr else
+        (_SRC_FIXED, defaults.get("unit_of_measure") or "U")
+    )
+    unit_src, unit_val, _ = _source_field(
+        "Unité", "",
+        pending_id, "unit", [_SRC_COLUMN, _SRC_FIXED], columns,
+        unit_current[0], unit_current[1],
+    )
+
+    def _date_format_picker(container, field_id):
+        options = {"JJ/MM/AAAA": "parse_date_fr", "AAAA-MM-JJ": "parse_date_iso"}
+        labels = list(options)
+        _vs_or_ve = file_metadata.get("validity_start") or file_metadata.get("validity_end") or {}
+        current_fmt = _vs_or_ve.get("transform") or "parse_date_fr"
+        default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
+        chosen = container.selectbox(
+            "Format de la date", labels, index=labels.index(default_label),
+            key=f"datefmt_simple_{field_id}_{pending_id}",
+        )
+        return options[chosen]
+
+    vs_current = (_SRC_CELL, (file_metadata.get("validity_start") or {}).get("cell") or "") \
+        if file_metadata.get("validity_start") else (_SRC_NONE, "")
+    vs_src, vs_val, date_fmt = _source_field(
+        "Starting Date (début de validité)", "",
+        pending_id, "validity_start", [_SRC_CELL, _SRC_NONE], columns,
+        vs_current[0], vs_current[1], extra_render=_date_format_picker,
+    )
+
+    ve_current = (_SRC_CELL, (file_metadata.get("validity_end") or {}).get("cell") or "") \
+        if file_metadata.get("validity_end") else (_SRC_NONE, "")
+    ve_src, ve_val, ve_date_fmt = _source_field(
+        "Ending Date (fin de validité)", "",
+        pending_id, "validity_end", [_SRC_CELL, _SRC_NONE], columns,
+        ve_current[0], ve_current[1], extra_render=_date_format_picker,
+    )
+    date_fmt = date_fmt or ve_date_fmt or "parse_date_fr"
+
+    st.markdown("**Minimum Quantity**")
+    st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
+    min_qty = st.number_input(
+        "Quantité minimum", min_value=1, step=1,
+        value=int(defaults.get("minimum_quantity") or 1),
+        key=f"min_qty_simple_{pending_id}", label_visibility="collapsed",
+    )
+    st.divider()
+
+    def _decimal_format_picker(container):
+        options = {
+            "Virgule française (1234,56)": "parse_decimal_fr",
+            "Point US (1234.56)": "parse_decimal_us",
+        }
+        labels = list(options)
+        current_fmt = current_price.get("transform") or "parse_decimal_fr"
+        default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
+        chosen = container.selectbox(
+            "Format du nombre", labels, index=labels.index(default_label),
+            key=f"decimalfmt_simple_{pending_id}",
+        )
+        return options[chosen]
+
+    st.markdown("**Direct Unit Cost** *(obligatoire)*")
+    left, right = st.columns([1, 2])
+    left.selectbox(
+        "Source", [_SRC_COLUMN], index=0,
+        key=f"price_src_{pending_id}", label_visibility="collapsed", disabled=True,
+    )
+    price_col = _pick_column_widget(
+        right, "Colonne", columns, current_price.get("source_col") or "",
+        key=f"price_col_{pending_id}",
+    )
+    decimal_fmt = _decimal_format_picker(right)
+    st.divider()
+
+    siren_current = (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "") \
+        if file_metadata.get("siren_fournisseur") else (_SRC_NONE, "")
+    siren_src, siren_val, _ = _source_field(
+        "SIREN Fournisseur", "",
+        pending_id, "siren", [_SRC_CELL, _SRC_NONE], columns,
+        siren_current[0], siren_current[1],
+    )
+
+    with st.expander("⚙️ Optionnel — famille, sous-famille, lignes à exclure", expanded=False):
+        family_current = (
+            (_SRC_COLUMN, (existing_columns.get("family") or {}).get("source_col") or "")
+            if (existing_columns.get("family") or {}).get("source_col") else
+            (_SRC_FIXED, (existing_columns.get("family") or {}).get("constant") or "")
+            if (existing_columns.get("family") or {}).get("constant") else
+            (_SRC_NONE, "")
+        )
+        family_src, family_val, _ = _source_field(
+            "Famille", "",
+            pending_id, "family", [_SRC_COLUMN, _SRC_FIXED, _SRC_NONE], columns,
+            family_current[0], family_current[1],
+        )
+        subfamily_current = (
+            (_SRC_COLUMN, (existing_columns.get("subfamily") or {}).get("source_col") or "")
+            if (existing_columns.get("subfamily") or {}).get("source_col") else
+            (_SRC_FIXED, (existing_columns.get("subfamily") or {}).get("constant") or "")
+            if (existing_columns.get("subfamily") or {}).get("constant") else
+            (_SRC_NONE, "")
+        )
+        subfamily_src, subfamily_val, _ = _source_field(
+            "Sous-famille", "",
+            pending_id, "subfamily", [_SRC_COLUMN, _SRC_FIXED, _SRC_NONE], columns,
+            subfamily_current[0], subfamily_current[1],
+        )
+        row_filter = data.get("row_filter") or {}
+        exclude_starts_str = st.text_input(
+            "Ignorer les lignes qui commencent par (séparées par des virgules)",
+            value=", ".join(row_filter.get("exclude_if_starts_with", [])),
+            key=f"exclude_starts_simple_{pending_id}",
+            help="Utile pour ignorer des lignes de titre ou de mentions légales.",
+        )
+
+    # ── Reconstruction du mapping ────────────────────────────────────────────
+    new_columns: dict[str, Any] = {
+        "supplier_product_code": {
+            "source_col": code_col, "transform": ["strip", "to_uppercase"], "required": True,
+        },
+        "designation": {"source_col": designation_col, "transform": "strip", "required": True},
+    }
+    new_file_metadata: dict[str, Any] = {}
+    new_defaults: dict[str, Any] = dict(defaults)
+    new_attributes: list[dict[str, Any]] = []
+
+    if generic_src == _SRC_COLUMN and generic_val:
+        new_columns["generic_code"] = {"source_col": generic_val}
+        new_defaults.pop("article_generique", None)
+    elif generic_src == _SRC_CELL and generic_val:
+        new_file_metadata["ramery_generic_code"] = {"cell": generic_val}
+        new_defaults.pop("article_generique", None)
+    elif generic_src == _SRC_FIXED and generic_val:
+        new_defaults["article_generique"] = generic_val
+
+    if unit_src == _SRC_COLUMN and unit_val:
+        new_attributes.append(
+            {"key": "unit_of_measure", "source_col": unit_val, "data_type": "string"}
+        )
+        new_defaults["unit_of_measure"] = "U"
+    elif unit_src == _SRC_FIXED:
+        new_defaults["unit_of_measure"] = unit_val or "U"
+
+    if vs_src == _SRC_CELL and vs_val:
+        new_file_metadata["validity_start"] = {"cell": vs_val, "transform": date_fmt}
+    if ve_src == _SRC_CELL and ve_val:
+        new_file_metadata["validity_end"] = {"cell": ve_val, "transform": date_fmt}
+    if siren_src == _SRC_CELL and siren_val:
+        new_file_metadata["siren_fournisseur"] = {"cell": siren_val}
+
+    if family_src == _SRC_COLUMN and family_val:
+        new_columns["family"] = {"source_col": family_val, "transform": "strip"}
+    elif family_src == _SRC_FIXED and family_val:
+        new_columns["family"] = {"constant": family_val}
+    if subfamily_src == _SRC_COLUMN and subfamily_val:
+        new_columns["subfamily"] = {"source_col": subfamily_val, "transform": "strip"}
+    elif subfamily_src == _SRC_FIXED and subfamily_val:
+        new_columns["subfamily"] = {"constant": subfamily_val}
+
+    new_row_filter: dict[str, Any] = {"must_have_value_in": [code_col]} if code_col else {}
+    exclude_starts = [c.strip() for c in exclude_starts_str.split(",") if c.strip()]
+    if exclude_starts:
+        new_row_filter["exclude_if_starts_with"] = exclude_starts
+
+    new_defaults.setdefault("minimum_quantity", int(min_qty))
+    new_defaults["minimum_quantity"] = int(min_qty)
+    # Champs Gery pas encore utilisés dans le CSV actuel — valeurs neutres fixes.
+    for k, v in {
+        "item_purchase_type": "Catalogue", "code_tva": "TVA20", "purchase_type": "Direct",
+        "gen_prod_posting_group": "", "job_cost_code": "", "tree_code": "",
+        "master_code": "", "item_category_code": "", "product_group_code": "",
+    }.items():
+        new_defaults.setdefault(k, v)
+
+    result: dict[str, Any] = {
+        "supplier_code": supplier_code.strip(),
+        "mapping_version": int(data.get("mapping_version", 1)),
+        "description": data.get("description", ""),
+        "upload_mode": data.get("upload_mode", "full"),
+    }
+    if "sharepoint_folder" in data:
+        result["sharepoint_folder"] = data["sharepoint_folder"]
+    if "filename_keywords" in data:
+        result["filename_keywords"] = data["filename_keywords"]
+    result["sheet_match"] = sheet_match
+    result["header_detection"] = {"mode": "explicit", "row": int(data_starts_row) - 1}
+    result["data_starts_row"] = int(data_starts_row)
+    result["extraction_mode"] = "table"
+    if new_row_filter:
+        result["row_filter"] = new_row_filter
+    result["columns"] = new_columns
+    result["prices"] = [{
+        "type": "gery", "source_col": price_col, "transform": decimal_fmt, "currency": "EUR",
+    }] if price_col else []
+    if new_attributes:
+        result["attributes"] = new_attributes
+    if new_file_metadata:
+        result["file_metadata"] = new_file_metadata
+    result["gery_export"] = {
+        "enabled": True,
+        "flatten_strategy": "cartesian",
+        "derived_code_template": "{supplier_product_code}",
+        "defaults": new_defaults,
+        "price_export_mapping": {"direct_unit_cost": "gery"},
+    }
     return result
 
 
@@ -1349,7 +1740,15 @@ c3.markdown(
 )
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 
-preview_text = fetch_preview(pending_id)
+sheets_key = f"sheets_list_{pending_id}"
+if sheets_key not in st.session_state:
+    st.session_state[sheets_key] = fetch_sheets(pending_id)
+sheets_list = st.session_state[sheets_key]
+
+# Le sélecteur de feuille du formulaire simplifié (clé sheet_simple_{pending_id}) peut
+# avoir déjà une valeur en session_state d'une interaction précédente — on l'utilise ici
+# pour que la grille d'aperçu à droite reflète bien la feuille choisie dans le formulaire.
+preview_text = fetch_preview(pending_id, sheet=st.session_state.get(f"sheet_simple_{pending_id}"))
 
 yaml_key = f"yaml_text_{pending_id}"
 yaml_content_key = f"yaml_content_{pending_id}"
@@ -1357,6 +1756,26 @@ if yaml_key not in st.session_state:
     st.session_state[yaml_key] = meta["yaml_proposed"]
 if yaml_content_key not in st.session_state:
     st.session_state[yaml_content_key] = meta["yaml_proposed"]
+
+# Streamlit interdit d'écrire dans st.session_state[yaml_key] une fois le widget
+# text_area (onglet YAML) instancié dans le même run — on passe donc par une clé de
+# "staging" (voir set_yaml_text ci-dessous) appliquée ici, avant toute instanciation.
+_staged_key = f"staged_yaml_{pending_id}"
+if _staged_key in st.session_state:
+    _staged_yaml = st.session_state.pop(_staged_key)
+    st.session_state[yaml_key] = _staged_yaml
+    st.session_state[yaml_content_key] = _staged_yaml
+
+
+def set_yaml_text(new_text: str) -> None:
+    """Programme yaml_key/yaml_content_key pour la prochaine exécution puis relance.
+
+    À utiliser à la place d'une écriture directe dans st.session_state[yaml_key] :
+    le widget text_area de l'onglet YAML est déjà instancié à ce stade du script,
+    donc Streamlit refuse toute écriture directe sur cette clé.
+    """
+    st.session_state[_staged_key] = new_text
+    st.rerun()
 
 # Écran partagé : édition à gauche, aperçu Excel (grille A,B,C + lignes) à droite.
 col_edit, col_preview = st.columns([3, 2])
@@ -1436,8 +1855,8 @@ with col_preview:
         st.caption("💡 Rédigez ou générez un YAML pour voir l'aperçu.")
 
 with col_edit:
-    tab_yaml, tab_form, tab_ai = st.tabs(
-        ["YAML", "Formulaire simplifié", "🤖 Assistant IA"]
+    tab_yaml, tab_simple, tab_form, tab_ai = st.tabs(
+        ["YAML", "🧩 Formulaire simplifié", "🛠️ Formulaire avancé", "🤖 Assistant IA"]
     )
 
 with tab_yaml:
@@ -1463,9 +1882,7 @@ with tab_yaml:
                     _yr = api_get(f"/api/v1/suppliers/{_chosen}/yaml")
                     if _yr.status_code == 200:
                         _loaded = _yr.json()["yaml_content"]
-                        st.session_state[yaml_key] = _loaded
-                        st.session_state[yaml_content_key] = _loaded
-                        st.rerun()
+                        set_yaml_text(_loaded)
                     else:
                         st.error(f"Impossible de charger le YAML ({_yr.status_code}).")
                 except Exception as _exc:
@@ -1480,10 +1897,7 @@ with tab_yaml:
         with st.spinner("L'IA analyse le fichier…"):
             _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
         if _gen_resp.status_code == 200:
-            _gen_yaml = _gen_resp.json()["yaml"]
-            st.session_state[yaml_key] = _gen_yaml
-            st.session_state[yaml_content_key] = _gen_yaml
-            st.rerun()
+            set_yaml_text(_gen_resp.json()["yaml"])
         elif _gen_resp.status_code == 404:
             st.error("Fichier source introuvable — impossible de générer le YAML.")
         else:
@@ -1504,6 +1918,52 @@ with tab_yaml:
         else:
             st.error(f"Erreur {resp.status_code} : {resp.text}")
 
+with tab_simple:
+    _sd = load_yaml(st.session_state[yaml_key])
+    _mode_simple = _sd.get("extraction_mode", "table")
+    if _mode_simple != "table":
+        st.info(
+            "Ce formulaire couvre pour l'instant les fichiers simples (un produit par "
+            f"ligne). Ce fournisseur utilise le mode '{_mode_simple}' — utilisez l'onglet "
+            "« Formulaire avancé » ou « YAML »."
+        )
+    else:
+        _guess_header_row = (
+            st.session_state.get(f"data_starts_simple_{pending_id}")
+            or _sd.get("data_starts_row")
+            or 2
+        )
+        _detected_cols_simple = parse_detected_columns(preview_text, int(_guess_header_row) - 1)
+        _new_mapping_simple = render_table_form_simple(
+            _sd, pending_id, _detected_cols_simple, sheets_list
+        )
+        _new_yaml_simple = dump_yaml(_new_mapping_simple)
+        if _new_yaml_simple != st.session_state.get(yaml_content_key):
+            _resp_simple = api_put(
+                f"/api/v1/review/{pending_id}", {"yaml_content": _new_yaml_simple}
+            )
+            if _resp_simple.status_code == 200:
+                st.session_state[f"simple_status_{pending_id}"] = ("ok", None)
+            elif _resp_simple.status_code == 422:
+                st.session_state[f"simple_status_{pending_id}"] = (
+                    "incomplete", _resp_simple.json().get("detail", [])
+                )
+            else:
+                st.session_state[f"simple_status_{pending_id}"] = ("error", _resp_simple.text)
+            set_yaml_text(_new_yaml_simple)
+
+        _status = st.session_state.get(f"simple_status_{pending_id}")
+        if _status:
+            _kind, _detail = _status
+            if _kind == "ok":
+                st.success("✅ Configuration enregistrée.")
+            elif _kind == "incomplete":
+                st.warning("⚠️ Configuration incomplète — complétez les champs manquants :")
+                for _err in (_detail or [])[:5]:
+                    st.caption(f"- {_err}")
+            else:
+                st.error(f"Erreur d'enregistrement : {_detail}")
+
 with tab_form:
     current_data = load_yaml(st.session_state[yaml_key])
     extraction_mode = current_data.get("extraction_mode")
@@ -1521,10 +1981,8 @@ with tab_form:
             new_yaml_text = dump_yaml(new_mapping)
             resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": new_yaml_text})
             if resp.status_code == 200:
-                st.session_state[yaml_key] = new_yaml_text
-                st.session_state[yaml_content_key] = new_yaml_text
                 st.success("Formulaire enregistré et validé.")
-                st.rerun()
+                set_yaml_text(new_yaml_text)
             elif resp.status_code == 422:
                 st.error("Configuration invalide :")
                 for err in resp.json().get("detail", []):
@@ -1560,8 +2018,6 @@ with tab_ai:
             )
         if resp.status_code == 200:
             data = resp.json()
-            st.session_state[yaml_key] = data["yaml"]
-            st.session_state[yaml_content_key] = data["yaml"]
             if data["valid"]:
                 st.session_state[chat_key].append((
                     "assistant",
@@ -1574,7 +2030,7 @@ with tab_ai:
                     "assistant",
                     f"⚠️ YAML modifié mais **invalide** :\n{errs}\n\nRedemande-moi une correction.",
                 ))
-            st.rerun()
+            set_yaml_text(data["yaml"])
         else:
             st.session_state[chat_key].append(
                 ("assistant", f"Erreur {resp.status_code} : {resp.text[:200]}")

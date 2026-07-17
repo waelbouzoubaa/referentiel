@@ -262,11 +262,16 @@ gery_export:
 """
 
 
-def read_excel_preview(file_path: Path, max_rows: int = 30) -> str:
-    """Lit les premières lignes de l'Excel et les retourne sous forme de texte tabulé."""
+def read_excel_preview(file_path: Path, max_rows: int = 30, sheet_name: str | None = None) -> str:
+    """Lit les premières lignes de l'Excel et les retourne sous forme de texte tabulé.
+
+    Args:
+        sheet_name: Onglet à lire. Si absent, lit l'onglet actif du classeur
+            (peut ne pas correspondre à l'onglet réellement ciblé par le mapping).
+    """
     try:
         wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-        ws = wb.active
+        ws = wb[sheet_name] if sheet_name else wb.active
         lines = []
         for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows, values_only=True), start=1):
             cells = "\t".join(str(c) if c is not None else "" for c in row)
