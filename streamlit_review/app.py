@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -708,6 +709,7 @@ _SRC_COLUMN = "Colonne du fichier"
 _SRC_CELL = "Cellule unique (cartouche)"
 _SRC_FIXED = "Valeur fixe"
 _SRC_NONE = "Non renseigné"
+_SRC_TEMPLATE = "Modèle calculé (texte + {variables})"
 
 
 def _column_choices(columns: list[tuple[str, str]]) -> tuple[list[str], dict[str, str]]:
@@ -772,6 +774,11 @@ def _source_field(
     elif source == _SRC_FIXED:
         value = right.text_input(
             "Valeur", value=current_value, key=f"{field_id}_fixed_{pending_id}"
+        )
+    elif source == _SRC_TEMPLATE:
+        value = right.text_input(
+            "Modèle (ex: {designation} | EP{epaisseur})",
+            value=current_value, key=f"{field_id}_tpl_{pending_id}",
         )
     st.divider()
     return source, value.strip() if isinstance(value, str) else value, extra
@@ -1323,6 +1330,517 @@ def _render_gery_export(data: dict[str, Any], pending_id: str) -> dict[str, Any]
     return result
 
 
+def _render_attributes_dropdown(
+    data_list: list[dict[str, Any]] | None, key: str, columns: list[tuple[str, str]]
+) -> list[dict[str, Any]]:
+    """Comme `_render_attributes`, mais « Colonne source » est une liste déroulante des
+    colonnes détectées plutôt qu'un champ texte libre à deviner."""
+    letters = [letter for letter, _ in columns]
+    rows = []
+    for attr in data_list or []:
+        attr = attr or {}
+        sc = attr.get("source_col", "")
+        rows.append({
+            "key": attr.get("key", ""),
+            "source_col": sc if sc in letters else (letters[0] if letters else ""),
+            "data_type": attr.get("data_type", "string"),
+            "unit": attr.get("unit", "") or "",
+            "transform": transform_to_str(attr.get("transform")),
+        })
+    df = st.data_editor(
+        rows, num_rows="dynamic", use_container_width=True, key=key,
+        column_config={
+            "key": st.column_config.TextColumn("Clé attribut (ex: epaisseur)"),
+            "source_col": st.column_config.SelectboxColumn("Colonne source", options=letters or [""]),
+            "data_type": st.column_config.SelectboxColumn(
+                "Type", options=["string", "integer", "decimal", "enum", "duration"]
+            ),
+            "unit": st.column_config.TextColumn("Unité"),
+            "transform": st.column_config.TextColumn("Transformation"),
+        },
+    )
+    out = []
+    for row in df:
+        k = (row.get("key") or "").strip()
+        sc = (row.get("source_col") or "").strip()
+        if not k or not sc:
+            continue
+        entry: dict[str, Any] = {
+            "key": k, "source_col": sc,
+            "data_type": (row.get("data_type") or "string").strip() or "string",
+        }
+        unit = (row.get("unit") or "").strip()
+        if unit:
+            entry["unit"] = unit
+        tr = transform_from_str(row.get("transform") or "")
+        if tr:
+            entry["transform"] = tr
+        out.append(entry)
+    return out
+
+
+# ─── Formulaire simplifié v2 — orienté métier, sans YAML (mode matrix) ─────
+
+def render_matrix_form_simple(
+    data: dict[str, Any],
+    pending_id: str,
+    preview_text: str,
+    sheets: list[str],
+    supplier_guess: str = "",
+) -> dict[str, Any] | None:
+    """Formulaire orienté métier pour le mode 'matrix' (grille prix palier × variante).
+
+    Même esprit que `render_table_form_simple` : dropdowns sur colonnes réellement
+    détectées, pas de lettre à deviner ni de plage à taper, aperçu recalculé en
+    direct (pas de bouton « Enregistrer »).
+    """
+    st.caption(
+        "Pour les fichiers en grille de prix (paliers de quantité × variantes, ex. "
+        "Airisol). Indique où sont les colonnes produit et où est la grille de prix — "
+        "l'aperçu à droite se met à jour automatiquement."
+    )
+
+    existing_pc = data.get("product_columns") or {}
+    file_metadata = data.get("file_metadata") or {}
+    gery_export = data.get("gery_export") or {}
+    defaults = gery_export.get("defaults") or {}
+    dz = data.get("data_zone") or {}
+    pm = data.get("price_matrix") or {}
+    ta = pm.get("tier_axis") or {}
+    va = pm.get("variant_axis") or {}
+    existing_groups = pm.get("column_groups") or []
+
+    # ── Repérage dans le fichier ────────────────────────────────────────────
+    st.markdown("##### 📍 Où sont les données dans le fichier ?")
+    c1, c2 = st.columns(2)
+    current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
+    sheet_options = sheets or ([current_sheet] if current_sheet else [])
+    if sheet_options:
+        idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
+        sheet_match = c1.selectbox(
+            "Feuille Excel", sheet_options, index=idx, key=f"sheet_matrix_{pending_id}"
+        )
+    else:
+        sheet_match = c1.text_input(
+            "Feuille Excel", value=current_sheet or "", key=f"sheet_matrix_{pending_id}"
+        )
+    supplier_code = c2.text_input(
+        "Code fournisseur *(obligatoire)*",
+        value=data.get("supplier_code") or supplier_guess or "",
+        key=f"supplier_code_matrix_{pending_id}",
+    )
+    if not supplier_code.strip():
+        st.warning(
+            "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés."
+        )
+
+    c3, c4 = st.columns(2)
+    variant_header_row = c3.number_input(
+        "Ligne d'en-tête (variantes + colonnes produit)", min_value=1, step=1,
+        value=int(va.get("header_row") or (data.get("header_detection") or {}).get("row") or 1),
+        key=f"va_hr_simple_{pending_id}",
+        help="La ligne où sont écrits les noms de variantes (ALU, BLANC…), juste au-dessus des produits.",
+    )
+    tier_header_row = c4.number_input(
+        "Ligne d'en-tête des paliers", min_value=1, step=1,
+        value=int(ta.get("header_row") or max(1, int(variant_header_row) - 1)),
+        key=f"ta_hr_simple_{pending_id}",
+        help="La ligne juste au-dessus, avec les paliers de quantité (souvent fusionnée sur plusieurs colonnes).",
+    )
+
+    _existing_rows = (dz.get("rows") or "").split(":")
+    _existing_row_start = (
+        int(_existing_rows[0]) if len(_existing_rows) == 2 and _existing_rows[0].strip().isdigit() else None
+    )
+    _existing_row_end = (
+        int(_existing_rows[1]) if len(_existing_rows) == 2 and _existing_rows[1].strip().isdigit() else None
+    )
+    c5, c6 = st.columns(2)
+    data_starts_row = c5.number_input(
+        "Première ligne de produits", min_value=2, step=1,
+        value=int(data.get("data_starts_row") or _existing_row_start or (int(variant_header_row) + 1)),
+        key=f"dsr_matrix_simple_{pending_id}",
+    )
+    data_ends_row = c6.number_input(
+        "Dernière ligne de produits", min_value=int(data_starts_row), step=1,
+        value=max(int(data_starts_row), int(_existing_row_end or (int(data_starts_row) + 20))),
+        key=f"der_matrix_simple_{pending_id}",
+        help="Dernière ligne du tableau (avant totaux/mentions légales éventuels).",
+    )
+
+    detected_columns = parse_detected_columns(preview_text, int(variant_header_row))
+    tier_ref_columns = parse_detected_columns(preview_text, int(tier_header_row))
+    tier_ref_by_letter = dict(tier_ref_columns)
+
+    st.divider()
+    st.markdown("##### 🧾 Colonnes produit")
+
+    _, designation_col, _ = _source_field(
+        "Désignation *(obligatoire)*", "",
+        pending_id, "mx_designation", [_SRC_COLUMN], detected_columns,
+        _SRC_COLUMN, (existing_pc.get("designation") or {}).get("source_col") or "",
+    )
+
+    _existing_code = existing_pc.get("supplier_product_code") or {}
+    if _existing_code.get("derived_from"):
+        code_current = (_SRC_TEMPLATE, _existing_code["derived_from"])
+    elif _existing_code.get("source_col"):
+        code_current = (_SRC_COLUMN, _existing_code["source_col"])
+    else:
+        code_current = (_SRC_TEMPLATE, "{designation}")
+    code_src, code_val, _ = _source_field(
+        "Code article Frns *(obligatoire)*",
+        "Colonne directe, ou modèle calculé si le code n'existe pas tel quel dans le "
+        "fichier (ex: {designation} | EP{epaisseur}).",
+        pending_id, "mx_code", [_SRC_COLUMN, _SRC_TEMPLATE], detected_columns,
+        code_current[0], code_current[1],
+    )
+
+    family_current = (
+        (_SRC_COLUMN, (existing_pc.get("family") or {}).get("source_col") or "")
+        if (existing_pc.get("family") or {}).get("source_col") else
+        (_SRC_FIXED, (existing_pc.get("family") or {}).get("constant") or "")
+        if (existing_pc.get("family") or {}).get("constant") else
+        (_SRC_NONE, "")
+    )
+    family_src, family_val, _ = _source_field(
+        "Famille", "", pending_id, "mx_family", [_SRC_COLUMN, _SRC_FIXED, _SRC_NONE],
+        detected_columns, family_current[0], family_current[1],
+    )
+    subfamily_current = (
+        (_SRC_COLUMN, (existing_pc.get("subfamily") or {}).get("source_col") or "")
+        if (existing_pc.get("subfamily") or {}).get("source_col") else
+        (_SRC_FIXED, (existing_pc.get("subfamily") or {}).get("constant") or "")
+        if (existing_pc.get("subfamily") or {}).get("constant") else
+        (_SRC_NONE, "")
+    )
+    subfamily_src, subfamily_val, _ = _source_field(
+        "Sous-famille", "", pending_id, "mx_subfamily", [_SRC_COLUMN, _SRC_FIXED, _SRC_NONE],
+        detected_columns, subfamily_current[0], subfamily_current[1],
+    )
+
+    st.markdown("**Attributs techniques** *(épaisseur, valeur R… utilisés dans le code "
+                "article et l'export)*")
+    attr_out = _render_attributes_dropdown(
+        data.get("attributes"), f"mx_attrs_{pending_id}", detected_columns
+    )
+    st.divider()
+
+    # ── Grille de prix ──────────────────────────────────────────────────────
+    st.markdown("##### 💰 Grille de prix (paliers × variantes)")
+    st.caption(
+        "Sélectionne les colonnes qui contiennent des prix, puis indique pour chacune "
+        "son palier de quantité et sa variante. Les colonnes consécutives partageant le "
+        "même palier forment un bloc."
+    )
+    all_labels, by_label = _column_choices(detected_columns)
+    price_letters_existing = [c for g in existing_groups for c in (g.get("columns") or [])]
+    default_price_labels = [lbl for lbl in all_labels if by_label[lbl] in price_letters_existing]
+    selected_price_labels = st.multiselect(
+        "Colonnes de prix", all_labels, default=default_price_labels,
+        key=f"price_cols_matrix_{pending_id}",
+    )
+    selected_letters = [by_label[lbl] for lbl in all_labels if lbl in selected_price_labels]
+
+    existing_tier_by_letter: dict[str, str] = {}
+    existing_variant_by_letter: dict[str, str] = {}
+    for g in existing_groups:
+        cols = g.get("columns") or []
+        variants = g.get("variants") or []
+        for i, c in enumerate(cols):
+            existing_tier_by_letter[c] = g.get("tier_label", "")
+            if i < len(variants):
+                existing_variant_by_letter[c] = variants[i]
+
+    detected_by_letter = dict(detected_columns)
+    grid_rows = [
+        {
+            "Colonne": letter,
+            "Palier": existing_tier_by_letter.get(letter) or tier_ref_by_letter.get(letter, ""),
+            "Variante": existing_variant_by_letter.get(letter) or detected_by_letter.get(letter, ""),
+        }
+        for letter in selected_letters
+    ]
+    price_grid = st.data_editor(
+        grid_rows, num_rows="fixed", use_container_width=True, hide_index=True,
+        key=f"price_grid_matrix_{pending_id}",
+        column_config={
+            "Colonne": st.column_config.TextColumn("Colonne", disabled=True),
+            "Palier": st.column_config.TextColumn("Palier (ex: 0-500m²)"),
+            "Variante": st.column_config.TextColumn("Variante (ex: ALU)"),
+        },
+    )
+
+    c7, c8, c9 = st.columns(3)
+    variant_dimension_name = c7.text_input(
+        "Nom de la dimension variante (ex: couleur, taille)",
+        value=va.get("dimension_name", "variante"), key=f"va_dim_simple_{pending_id}",
+    )
+    tier_fallback_unit = c8.text_input(
+        "Unité des paliers (ex: m²)", value=ta.get("fallback_unit", "m²"),
+        key=f"ta_unit_simple_{pending_id}",
+    )
+    currency = c9.text_input(
+        "Devise", value=pm.get("currency", "EUR"), key=f"currency_simple_{pending_id}"
+    )
+
+    def _decimal_format_picker(container):
+        options = {
+            "Virgule française (1234,56)": "parse_decimal_fr",
+            "Point US (1234.56)": "parse_decimal_us",
+        }
+        labels = list(options)
+        current_fmt = pm.get("transform") or "parse_decimal_fr"
+        default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
+        chosen = container.selectbox(
+            "Format du nombre", labels, index=labels.index(default_label),
+            key=f"decimalfmt_matrix_{pending_id}",
+        )
+        return options[chosen]
+
+    decimal_fmt = _decimal_format_picker(st)
+
+    with st.expander("⚙️ Options avancées de la grille", expanded=False):
+        detect_per_block = st.checkbox(
+            "Lire le palier colonne par colonne (recommandé si les cellules de palier "
+            "sont fusionnées)",
+            value=bool(ta.get("detect_per_block", True)), key=f"detect_per_block_{pending_id}",
+        )
+        price_type = st.text_input(
+            "Type de prix (interne)", value=pm.get("price_type", "list"),
+            key=f"price_type_matrix_{pending_id}",
+        )
+    st.divider()
+
+    unit_attr = next(
+        (a for a in (data.get("attributes") or []) if a and a.get("key") == "unit_of_measure"), {}
+    )
+    unit_current = (
+        (_SRC_COLUMN, unit_attr.get("source_col") or "")
+        if unit_attr else
+        (_SRC_FIXED, defaults.get("unit_of_measure") or "M2")
+    )
+    unit_src, unit_val, _ = _source_field(
+        "Unité", "", pending_id, "mx_unit", [_SRC_COLUMN, _SRC_FIXED], detected_columns,
+        unit_current[0], unit_current[1],
+    )
+
+    def _date_format_picker(container, field_id):
+        options = {"JJ/MM/AAAA": "parse_date_fr", "AAAA-MM-JJ": "parse_date_iso"}
+        labels = list(options)
+        _vs_or_ve = file_metadata.get("validity_start") or file_metadata.get("validity_end") or {}
+        current_fmt = _vs_or_ve.get("transform") or "parse_date_fr"
+        default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
+        chosen = container.selectbox(
+            "Format de la date", labels, index=labels.index(default_label),
+            key=f"datefmt_matrix_{field_id}_{pending_id}",
+        )
+        return options[chosen]
+
+    vs_current = (_SRC_CELL, (file_metadata.get("validity_start") or {}).get("cell") or "") \
+        if file_metadata.get("validity_start") else (_SRC_NONE, "")
+    vs_src, vs_val, date_fmt = _source_field(
+        "Starting Date (début de validité)", "", pending_id, "mx_validity_start",
+        [_SRC_CELL, _SRC_NONE], detected_columns, vs_current[0], vs_current[1],
+        extra_render=_date_format_picker,
+    )
+    ve_current = (_SRC_CELL, (file_metadata.get("validity_end") or {}).get("cell") or "") \
+        if file_metadata.get("validity_end") else (_SRC_NONE, "")
+    ve_src, ve_val, ve_date_fmt = _source_field(
+        "Ending Date (fin de validité)", "", pending_id, "mx_validity_end",
+        [_SRC_CELL, _SRC_NONE], detected_columns, ve_current[0], ve_current[1],
+        extra_render=_date_format_picker,
+    )
+    date_fmt = date_fmt or ve_date_fmt or "parse_date_fr"
+
+    generic_current = (
+        (_SRC_COLUMN, (existing_pc.get("generic_code") or {}).get("source_col") or "")
+        if existing_pc.get("generic_code") else
+        (_SRC_CELL, (file_metadata.get("ramery_generic_code") or {}).get("cell") or "")
+        if file_metadata.get("ramery_generic_code") else
+        (_SRC_FIXED, defaults.get("article_generique") or "")
+        if defaults.get("article_generique") else
+        (_SRC_NONE, "")
+    )
+    generic_src, generic_val, _ = _source_field(
+        "Article générique associé",
+        "Variable selon le produit (colonne) ou fixe pour tout le fichier (cartouche / valeur).",
+        pending_id, "mx_generic", [_SRC_COLUMN, _SRC_CELL, _SRC_FIXED, _SRC_NONE],
+        detected_columns, generic_current[0], generic_current[1],
+    )
+
+    siren_current = (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "") \
+        if file_metadata.get("siren_fournisseur") else (_SRC_NONE, "")
+    siren_src, siren_val, _ = _source_field(
+        "SIREN Fournisseur", "", pending_id, "mx_siren", [_SRC_CELL, _SRC_NONE],
+        detected_columns, siren_current[0], siren_current[1],
+    )
+
+    st.markdown("**Minimum Quantity**")
+    st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
+    min_qty = st.number_input(
+        "Quantité minimum", min_value=1, step=1,
+        value=int(defaults.get("minimum_quantity") or 1),
+        key=f"min_qty_matrix_{pending_id}", label_visibility="collapsed",
+    )
+    st.divider()
+
+    with st.expander("🏷️ Code article généré (obligatoire)", expanded=True):
+        attr_keys = [a.get("key") for a in (attr_out or []) if a.get("key")]
+        available_vars = ["designation", *attr_keys, "variant_code", "tier_label"]
+        st.caption("Variables disponibles : " + ", ".join(f"{{{v}}}" for v in available_vars))
+        default_template = gery_export.get("derived_code_template") or (
+            "{designation}" + "".join(f" | {{{k}}}" for k in attr_keys)
+            + " | {variant_code} | {tier_label}"
+        )
+        derived_code_template = st.text_input(
+            "Modèle du code article Gery", value=default_template,
+            key=f"derived_tpl_matrix_{pending_id}",
+            help="Les segments dont une variable est absente sont automatiquement omis.",
+        )
+
+    # ── Reconstruction du mapping ────────────────────────────────────────────
+    def _col_index(letter: str) -> int:
+        n = 0
+        for ch in letter.strip().upper():
+            n = n * 26 + (ord(ch) - ord("A") + 1)
+        return n - 1
+
+    def _range_str(letters: list[str]) -> str:
+        if not letters:
+            return "A:A"
+        idxs = sorted(_col_index(letter) for letter in letters)
+        return f"{_col_letter(idxs[0])}:{_col_letter(idxs[-1])}"
+
+    new_pc: dict[str, Any] = {
+        "designation": {"source_col": designation_col, "transform": "strip", "required": True},
+    }
+    if code_src == _SRC_COLUMN and code_val:
+        new_pc["supplier_product_code"] = {"source_col": code_val, "required": True}
+    elif code_src == _SRC_TEMPLATE and code_val:
+        new_pc["supplier_product_code"] = {"derived_from": code_val, "required": True}
+
+    new_defaults: dict[str, Any] = dict(defaults)
+    new_file_metadata: dict[str, Any] = {}
+
+    if generic_src == _SRC_COLUMN and generic_val:
+        new_pc["generic_code"] = {"source_col": generic_val}
+        new_defaults.pop("article_generique", None)
+    elif generic_src == _SRC_CELL and generic_val:
+        new_file_metadata["ramery_generic_code"] = {"cell": generic_val}
+        new_defaults.pop("article_generique", None)
+    elif generic_src == _SRC_FIXED and generic_val:
+        new_defaults["article_generique"] = generic_val
+
+    new_attributes = list(attr_out or [])
+    if unit_src == _SRC_COLUMN and unit_val:
+        new_attributes.append(
+            {"key": "unit_of_measure", "source_col": unit_val, "data_type": "string"}
+        )
+        new_defaults["unit_of_measure"] = "U"
+    elif unit_src == _SRC_FIXED:
+        new_defaults["unit_of_measure"] = unit_val or "U"
+
+    if vs_src == _SRC_CELL and vs_val:
+        new_file_metadata["validity_start"] = {"cell": vs_val, "transform": date_fmt}
+    if ve_src == _SRC_CELL and ve_val:
+        new_file_metadata["validity_end"] = {"cell": ve_val, "transform": date_fmt}
+    if siren_src == _SRC_CELL and siren_val:
+        new_file_metadata["siren_fournisseur"] = {"cell": siren_val}
+
+    if family_src == _SRC_COLUMN and family_val:
+        new_pc["family"] = {"source_col": family_val, "transform": "strip"}
+    elif family_src == _SRC_FIXED and family_val:
+        new_pc["family"] = {"constant": family_val}
+    if subfamily_src == _SRC_COLUMN and subfamily_val:
+        new_pc["subfamily"] = {"source_col": subfamily_val, "transform": "strip"}
+    elif subfamily_src == _SRC_FIXED and subfamily_val:
+        new_pc["subfamily"] = {"constant": subfamily_val}
+
+    new_groups: list[dict[str, Any]] = []
+    for row in price_grid:
+        letter = (row.get("Colonne") or "").strip()
+        tier = (row.get("Palier") or "").strip()
+        variant = (row.get("Variante") or "").strip()
+        if not letter:
+            continue
+        if new_groups and new_groups[-1]["tier_label"] == tier:
+            new_groups[-1]["columns"].append(letter)
+            new_groups[-1]["variants"].append(variant)
+        else:
+            new_groups.append({"columns": [letter], "tier_label": tier, "variants": [variant]})
+
+    product_letters = [v.get("source_col") for v in new_pc.values() if v.get("source_col")]
+    price_letters_final = [c for g in new_groups for c in g["columns"]]
+
+    new_row_filter: dict[str, Any] = {}
+    if designation_col:
+        new_row_filter["must_have_value_in"] = [designation_col]
+    if price_letters_final:
+        new_row_filter["must_have_value_in_any"] = price_letters_final
+
+    new_defaults["minimum_quantity"] = int(min_qty)
+    for k, v in {
+        "item_purchase_type": "Catalogue", "code_tva": "TVA20", "purchase_type": "Direct",
+        "gen_prod_posting_group": "", "job_cost_code": "", "tree_code": "",
+        "master_code": "", "item_category_code": "", "product_group_code": "",
+    }.items():
+        new_defaults.setdefault(k, v)
+
+    result: dict[str, Any] = {
+        "supplier_code": supplier_code.strip(),
+        "mapping_version": int(data.get("mapping_version", 1)),
+        "description": data.get("description", ""),
+        "upload_mode": data.get("upload_mode", "full"),
+    }
+    if "sharepoint_folder" in data:
+        result["sharepoint_folder"] = data["sharepoint_folder"]
+    if "filename_keywords" in data:
+        result["filename_keywords"] = data["filename_keywords"]
+    result["sheet_match"] = sheet_match
+    result["header_detection"] = {"mode": "explicit", "row": int(variant_header_row)}
+    result["data_starts_row"] = int(data_starts_row)
+    result["extraction_mode"] = "matrix"
+    if new_row_filter:
+        result["row_filter"] = new_row_filter
+    result["data_zone"] = {
+        "rows": f"{int(data_starts_row)}:{int(data_ends_row)}",
+        "product_columns": _range_str(product_letters),
+        "price_matrix_columns": _range_str(price_letters_final),
+    }
+    result["product_columns"] = new_pc
+    if new_attributes:
+        result["attributes"] = new_attributes
+    result["price_matrix"] = {
+        "tier_axis": {
+            "header_row": int(tier_header_row),
+            "type": "quantity_range",
+            "fallback_unit": tier_fallback_unit.strip() or "m²",
+            "detect_per_block": bool(detect_per_block),
+        },
+        "variant_axis": {
+            "header_row": int(variant_header_row),
+            "dimension_name": variant_dimension_name.strip() or "variante",
+        },
+        "column_groups": new_groups,
+        "price_type": price_type.strip() or "list",
+        "currency": currency.strip() or "EUR",
+        "transform": decimal_fmt,
+    }
+    if data.get("commercial_rules"):
+        result["commercial_rules"] = data["commercial_rules"]
+    if new_file_metadata:
+        result["file_metadata"] = new_file_metadata
+    result["gery_export"] = {
+        "enabled": True,
+        "flatten_strategy": "cartesian",
+        "derived_code_template": derived_code_template.strip() or "{supplier_product_code}",
+        "defaults": new_defaults,
+        "price_export_mapping": {"direct_unit_cost": price_type.strip() or "list"},
+    }
+    return result
+
+
 # ─── Formulaire guidé — mode matrix ─────────────────────────────────────────
 
 def render_matrix_form(
@@ -1491,6 +2009,406 @@ def render_matrix_form(
     if fm:
         result["file_metadata"] = fm
     result["gery_export"] = gery
+    return result
+
+
+def _snake(text: str) -> str:
+    """Texte libre → identifiant snake_case ASCII, pour suggérer un nom de variable."""
+    s = re.sub(r"[^0-9a-zA-Z]+", "_", (text or "").strip().lower()).strip("_")
+    return s or "valeur"
+
+
+# ─── Formulaire simplifié v2 — orienté métier, sans YAML (mode multi_table) ─
+
+def render_multi_table_form_simple(
+    data: dict[str, Any],
+    pending_id: str,
+    preview_text: str,
+    sheets: list[str],
+    supplier_guess: str = "",
+) -> dict[str, Any] | None:
+    """Formulaire orienté métier pour le mode 'multi_table' (plusieurs tableaux, ex.
+    Agenor). Même esprit que les autres formulaires simplifiés : dropdowns sur colonnes
+    détectées, pas de lettre à deviner, aperçu recalculé en direct.
+    """
+    st.caption(
+        "Pour les fichiers avec plusieurs tableaux distincts dans la même feuille (ex. "
+        "prestations Agenor). Un tableau = une section ci-dessous. L'aperçu à droite se "
+        "met à jour automatiquement."
+    )
+
+    file_metadata = data.get("file_metadata") or {}
+    gery_export = data.get("gery_export") or {}
+    defaults = gery_export.get("defaults") or {}
+    existing_tables = data.get("tables") or []
+
+    st.markdown("##### 📍 Informations générales")
+    c1, c2 = st.columns(2)
+    current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
+    sheet_options = sheets or ([current_sheet] if current_sheet else [])
+    if sheet_options:
+        idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
+        sheet_match = c1.selectbox(
+            "Feuille Excel", sheet_options, index=idx, key=f"sheet_mt_{pending_id}"
+        )
+    else:
+        sheet_match = c1.text_input(
+            "Feuille Excel", value=current_sheet or "", key=f"sheet_mt_{pending_id}"
+        )
+    supplier_code = c2.text_input(
+        "Code fournisseur *(obligatoire)*",
+        value=data.get("supplier_code") or supplier_guess or "",
+        key=f"supplier_code_mt_{pending_id}",
+    )
+    if not supplier_code.strip():
+        st.warning(
+            "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés."
+        )
+
+    st.markdown("**Prix — réglages communs à tous les tableaux**")
+    c3, c4, c5 = st.columns(3)
+    price_type = c3.text_input(
+        "Type de prix (ex: forfait)", value=(gery_export.get("price_export_mapping") or {}).get(
+            "direct_unit_cost", "forfait"
+        ),
+        key=f"price_type_mt_{pending_id}",
+    )
+
+    def _decimal_format_picker(container):
+        options = {
+            "Virgule française (1234,56)": "parse_decimal_fr",
+            "Point US (1234.56)": "parse_decimal_us",
+        }
+        labels = list(options)
+        current_fmt = (
+            (existing_tables[0].get("prices") or [{}])[0].get("transform")
+            if existing_tables else None
+        ) or "parse_decimal_fr"
+        default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
+        chosen = container.selectbox(
+            "Format du nombre", labels, index=labels.index(default_label),
+            key=f"decimalfmt_mt_{pending_id}",
+        )
+        return options[chosen]
+
+    decimal_fmt = _decimal_format_picker(c4)
+    currency = c5.text_input("Devise", value="EUR", key=f"currency_mt_{pending_id}")
+
+    st.divider()
+    st.markdown("##### 🧾 Tableaux")
+    nb_tables = st.number_input(
+        "Nombre de tableaux dans le fichier", min_value=1, step=1,
+        value=max(1, len(existing_tables)), key=f"nb_tables_mt_{pending_id}",
+    )
+
+    layouts = {
+        "Grille (plusieurs colonnes de prix par dimension — ex: fréquence, taille…)": "matrix_2D",
+        "Liste simple (une seule colonne de prix)": "barème_1D",
+    }
+    layout_labels = list(layouts)
+
+    def _col_index(letter: str) -> int:
+        n = 0
+        for ch in letter.strip().upper():
+            n = n * 26 + (ord(ch) - ord("A") + 1)
+        return n - 1
+
+    def _range_str(letters: list[str]) -> str:
+        letters = [letter for letter in letters if letter]
+        if not letters:
+            return "A:A"
+        idxs = sorted(_col_index(letter) for letter in letters)
+        return f"{_col_letter(idxs[0])}:{_col_letter(idxs[-1])}"
+
+    new_tables: list[dict[str, Any]] = []
+    for i in range(int(nb_tables)):
+        t = existing_tables[i] if i < len(existing_tables) else {}
+        tpl = t.get("product_template") or {}
+        zone = t.get("zone") or {}
+        existing_dims = t.get("col_dimensions") or []
+        default_layout_key = next(
+            (lbl for lbl, v in layouts.items() if v == t.get("layout")), layout_labels[0]
+        )
+        with st.expander(f"Tableau {i + 1} : {t.get('name') or '(nouveau)'}", expanded=(i == 0)):
+            tc1, tc2 = st.columns(2)
+            name = tc1.text_input(
+                "Nom technique (snake_case)", value=t.get("name") or f"tableau_{i + 1}",
+                key=f"mt_name_{pending_id}_{i}",
+            )
+            description = tc2.text_input(
+                "Description", value=t.get("description") or "", key=f"mt_desc_{pending_id}_{i}",
+            )
+            layout_label = st.selectbox(
+                "Type de tableau", layout_labels,
+                index=layout_labels.index(default_layout_key), key=f"mt_layout_{pending_id}_{i}",
+            )
+            layout = layouts[layout_label]
+
+            zc1, zc2, zc3 = st.columns(3)
+            header_row = zc1.number_input(
+                "Ligne d'en-tête", min_value=1, step=1,
+                value=int(zone.get("header_row") or 1), key=f"mt_hr_{pending_id}_{i}",
+            )
+            _existing_dr = (zone.get("data_rows") or "").split(":")
+            _dr_start = int(_existing_dr[0]) if len(_existing_dr) == 2 and _existing_dr[0].strip().isdigit() else None
+            _dr_end = int(_existing_dr[1]) if len(_existing_dr) == 2 and _existing_dr[1].strip().isdigit() else None
+            data_row_start = zc2.number_input(
+                "Première ligne de données", min_value=1, step=1,
+                value=int(_dr_start or (int(header_row) + 1)), key=f"mt_drs_{pending_id}_{i}",
+            )
+            data_row_end = zc3.number_input(
+                "Dernière ligne de données", min_value=int(data_row_start), step=1,
+                value=max(int(data_row_start), int(_dr_end or (int(data_row_start) + 10))),
+                key=f"mt_dre_{pending_id}_{i}",
+            )
+
+            table_columns = parse_detected_columns(preview_text, int(header_row))
+            row_labels, row_by_label = _column_choices(table_columns)
+            existing_row_col = (zone.get("cols") or "").split(":")[0].strip() if zone.get("cols") else ""
+            row_default_idx = next(
+                (idx for idx, lbl in enumerate(row_labels) if row_by_label[lbl] == existing_row_col), 0
+            ) if row_labels else 0
+            row_col_label = st.selectbox(
+                "Colonne indicatrice de ligne (identifie chaque ligne du tableau)",
+                row_labels, index=row_default_idx if row_labels else 0,
+                key=f"mt_rowcol_{pending_id}_{i}",
+                help="Ex: la taille de la base vie, le nom de la prestation… Sert aussi de "
+                     "valeur de repli pour les variables du modèle ci-dessous.",
+            ) if row_labels else st.text_input(
+                "Colonne indicatrice de ligne (lettre)", value=existing_row_col,
+                key=f"mt_rowcol_txt_{pending_id}_{i}",
+            )
+            row_col = row_by_label[row_col_label] if row_labels else row_col_label
+            row_var_name = _snake(dict(table_columns).get(row_col, "") or row_col)
+
+            fc1, fc2 = st.columns(2)
+            family = fc1.text_input("Famille", value=tpl.get("family") or "",
+                                    key=f"mt_family_{pending_id}_{i}")
+            subfamily = fc2.text_input("Sous-famille", value=tpl.get("subfamily") or "",
+                                       key=f"mt_subfamily_{pending_id}_{i}")
+
+            new_dims: list[dict[str, Any]] = []
+            dimension_key = ""
+            price_col_simple = ""
+            if layout == "matrix_2D":
+                dimension_key = st.text_input(
+                    "Nom de la dimension (ex: frequency, taille…)",
+                    value=(existing_dims[0].get("key") if existing_dims else "") or "dimension",
+                    key=f"mt_dimkey_{pending_id}_{i}",
+                )
+                st.caption(
+                    "Une ligne par valeur de dimension (ex: 1x/semaine, 2x/semaine…). "
+                    "« Colonne temps max » optionnelle."
+                )
+                col_letters = [ltr for ltr, _ in table_columns] or [""]
+                dim_rows = [
+                    {
+                        "Valeur": d.get("value", ""),
+                        "Colonne prix": d.get("price_col", "") if d.get("price_col") in col_letters
+                        else (col_letters[0] if col_letters else ""),
+                        "Colonne temps max": d.get("max_time_col") or "",
+                    }
+                    for d in existing_dims
+                ]
+                dim_df = st.data_editor(
+                    dim_rows, num_rows="dynamic", use_container_width=True,
+                    key=f"mt_dims_{pending_id}_{i}",
+                    column_config={
+                        "Valeur": st.column_config.TextColumn("Valeur (ex: 1x_semaine)"),
+                        "Colonne prix": st.column_config.SelectboxColumn(
+                            "Colonne prix", options=col_letters
+                        ),
+                        "Colonne temps max": st.column_config.SelectboxColumn(
+                            "Colonne temps max (optionnel)", options=[""] + col_letters
+                        ),
+                    },
+                )
+                for row in dim_df:
+                    value = (row.get("Valeur") or "").strip()
+                    price_col = (row.get("Colonne prix") or "").strip()
+                    if not value or not price_col:
+                        continue
+                    max_time_col = (row.get("Colonne temps max") or "").strip()
+                    cols = [price_col] + ([max_time_col] if max_time_col else [])
+                    dim: dict[str, Any] = {
+                        "columns": cols, "key": dimension_key.strip() or "dimension",
+                        "value": value, "price_col": price_col,
+                    }
+                    if max_time_col:
+                        dim["max_time_col"] = max_time_col
+                    new_dims.append(dim)
+                price_col_simple = new_dims[0]["price_col"] if new_dims else (col_letters[0] if col_letters else "")
+            else:
+                _, price_col_simple, _ = _source_field(
+                    "Colonne prix *(obligatoire)*", "",
+                    pending_id, f"mt_price_{i}", [_SRC_COLUMN], table_columns,
+                    _SRC_COLUMN,
+                    (t.get("prices") or [{}])[0].get("source_col", "") if t.get("prices") else "",
+                )
+
+            st.markdown("**Attributs techniques** *(optionnel — ex: temps max en durée)*")
+            attrs_out = _render_attributes_dropdown(
+                t.get("attributes"), f"mt_attrs_{pending_id}_{i}", table_columns
+            )
+
+            with st.expander("🏷️ Modèle du produit (désignation + code article)", expanded=True):
+                st.caption(
+                    f"Variable réelle disponible : `{{{dimension_key or 'dimension'}}}` "
+                    f"(valeur de la dimension). Toute AUTRE variable (ex: `{{{row_var_name}}}`) "
+                    "prend automatiquement la valeur de la colonne indicatrice de ligne — "
+                    "le nom entre accolades est libre, seule la position compte."
+                )
+                default_desig = tpl.get("designation_template") or (
+                    f"{{{row_var_name}}} — {{{dimension_key or 'dimension'}}}"
+                    if layout == "matrix_2D" else f"{{{row_var_name}}}"
+                )
+                designation_template = st.text_input(
+                    "Modèle de désignation", value=default_desig,
+                    key=f"mt_desigtpl_{pending_id}_{i}",
+                )
+                default_code = tpl.get("supplier_product_code_template") or (
+                    f"{_snake(supplier_code).upper()}-{{{row_var_name}_slug}}-{{{dimension_key or 'dimension'}_slug}}"
+                    if layout == "matrix_2D" else f"{_snake(supplier_code).upper()}-{{{row_var_name}_slug}}"
+                )
+                code_template = st.text_input(
+                    "Modèle de code article", value=default_code,
+                    key=f"mt_codetpl_{pending_id}_{i}",
+                )
+
+        tbl: dict[str, Any] = {
+            "name": name.strip() or f"tableau_{i + 1}",
+            "zone": {
+                "header_row": int(header_row),
+                "data_rows": f"{int(data_row_start)}:{int(data_row_end)}",
+                "cols": _range_str(
+                    [row_col]
+                    + [d["price_col"] for d in new_dims]
+                    + [d["max_time_col"] for d in new_dims if d.get("max_time_col")]
+                    + ([price_col_simple] if price_col_simple else [])
+                    + [a["source_col"] for a in attrs_out]
+                ),
+            },
+            "layout": layout,
+        }
+        if description.strip():
+            tbl["description"] = description.strip()
+        if new_dims:
+            tbl["col_dimensions"] = new_dims
+        ptpl: dict[str, Any] = {
+            "designation_template": designation_template.strip() or f"{{{row_var_name}}}",
+            "supplier_product_code_template": code_template.strip() or f"{{{row_var_name}_slug}}",
+        }
+        if family.strip():
+            ptpl["family"] = family.strip()
+        if subfamily.strip():
+            ptpl["subfamily"] = subfamily.strip()
+        tbl["product_template"] = ptpl
+        if price_col_simple:
+            tbl["prices"] = [{
+                "type": price_type.strip() or "forfait", "source_col": price_col_simple,
+                "transform": decimal_fmt, "currency": currency.strip() or "EUR",
+            }]
+        if attrs_out:
+            tbl["attributes"] = attrs_out
+        new_tables.append(tbl)
+
+    st.divider()
+    st.markdown("##### 📅 Validité, code générique, SIREN")
+    c6, c7 = st.columns(2)
+    vs_cell = c6.text_input(
+        "Cellule début de validité (optionnel)",
+        value=(file_metadata.get("validity_start") or {}).get("cell", "") or "",
+        key=f"mt_vs_cell_{pending_id}",
+    )
+    ve_cell = c7.text_input(
+        "Cellule fin de validité (optionnel)",
+        value=(file_metadata.get("validity_end") or {}).get("cell", "") or "",
+        key=f"mt_ve_cell_{pending_id}",
+    )
+    date_options = {"JJ/MM/AAAA": "parse_date_fr", "AAAA-MM-JJ": "parse_date_iso"}
+    date_labels = list(date_options)
+    _current_date_fmt = (
+        (file_metadata.get("validity_start") or {}).get("transform")
+        or (file_metadata.get("validity_end") or {}).get("transform")
+        or "parse_date_fr"
+    )
+    date_default_label = next((lbl for lbl, v in date_options.items() if v == _current_date_fmt), date_labels[0])
+    date_fmt = date_options[st.selectbox(
+        "Format de date", date_labels, index=date_labels.index(date_default_label),
+        key=f"mt_datefmt_{pending_id}",
+    )]
+    st.caption(
+        "Pour une date unique combinée (ex: « Validité du 01/01 au 31/12 »), utilise "
+        "l'onglet « Formulaire avancé » ou « YAML » (regex `validity_period`)."
+    )
+
+    generic_cell = st.text_input(
+        "Cellule du code article générique Ramery (optionnel)",
+        value=(file_metadata.get("ramery_generic_code") or {}).get("cell", "") or "",
+        key=f"mt_generic_cell_{pending_id}",
+    )
+    siren_cell = st.text_input(
+        "Cellule SIREN fournisseur (optionnel)",
+        value=(file_metadata.get("siren_fournisseur") or {}).get("cell", "") or "",
+        key=f"mt_siren_cell_{pending_id}",
+    )
+
+    c8, c9 = st.columns(2)
+    unit_of_measure = c8.text_input(
+        "Unité (ex: FORFAIT, U…)", value=defaults.get("unit_of_measure") or "FORFAIT",
+        key=f"mt_unit_{pending_id}",
+    )
+    min_qty = c9.number_input(
+        "Quantité minimum", min_value=1, step=1,
+        value=int(defaults.get("minimum_quantity") or 1), key=f"mt_minqty_{pending_id}",
+    )
+
+    # ── Reconstruction du mapping ────────────────────────────────────────────
+    new_file_metadata: dict[str, Any] = {}
+    if vs_cell.strip():
+        new_file_metadata["validity_start"] = {"cell": vs_cell.strip(), "transform": date_fmt}
+    if ve_cell.strip():
+        new_file_metadata["validity_end"] = {"cell": ve_cell.strip(), "transform": date_fmt}
+    if generic_cell.strip():
+        new_file_metadata["ramery_generic_code"] = {"cell": generic_cell.strip()}
+    if siren_cell.strip():
+        new_file_metadata["siren_fournisseur"] = {"cell": siren_cell.strip()}
+
+    new_defaults: dict[str, Any] = dict(defaults)
+    new_defaults["unit_of_measure"] = unit_of_measure.strip() or "FORFAIT"
+    new_defaults["minimum_quantity"] = int(min_qty)
+    for k, v in {"item_purchase_type": "Catalogue", "code_tva": "TVA20"}.items():
+        new_defaults.setdefault(k, v)
+    if not generic_cell.strip() and defaults.get("article_generique"):
+        new_defaults["article_generique"] = defaults["article_generique"]
+
+    result: dict[str, Any] = {
+        "supplier_code": supplier_code.strip(),
+        "mapping_version": int(data.get("mapping_version", 1)),
+        "description": data.get("description", ""),
+        "upload_mode": data.get("upload_mode", "full"),
+    }
+    if "sharepoint_folder" in data:
+        result["sharepoint_folder"] = data["sharepoint_folder"]
+    if "filename_keywords" in data:
+        result["filename_keywords"] = data["filename_keywords"]
+    result["sheet_match"] = sheet_match
+    first_zone = new_tables[0]["zone"] if new_tables else {}
+    result["header_detection"] = {
+        "mode": "explicit", "row": int(first_zone.get("header_row") or 1),
+    }
+    result["data_starts_row"] = int((first_zone.get("data_rows") or "2:2").split(":")[0])
+    result["extraction_mode"] = "multi_table"
+    result["product_kind"] = data.get("product_kind") or "service"
+    result["tables"] = new_tables
+    if new_file_metadata:
+        result["file_metadata"] = new_file_metadata
+    result["gery_export"] = {
+        "enabled": True,
+        "flatten_strategy": "cartesian",
+        "defaults": new_defaults,
+        "price_export_mapping": {"direct_unit_cost": price_type.strip() or "forfait"},
+    }
     return result
 
 
@@ -1927,13 +2845,8 @@ with tab_yaml:
 with tab_simple:
     _sd = load_yaml(st.session_state[yaml_key])
     _mode_simple = _sd.get("extraction_mode", "table")
-    if _mode_simple != "table":
-        st.info(
-            "Ce formulaire couvre pour l'instant les fichiers simples (un produit par "
-            f"ligne). Ce fournisseur utilise le mode '{_mode_simple}' — utilisez l'onglet "
-            "« Formulaire avancé » ou « YAML »."
-        )
-    else:
+
+    if _mode_simple == "table":
         _guess_header_row = (
             st.session_state.get(f"data_starts_simple_{pending_id}")
             or _sd.get("data_starts_row")
@@ -1944,6 +2857,24 @@ with tab_simple:
             _sd, pending_id, _detected_cols_simple, sheets_list,
             supplier_guess=meta.get("supplier_guess", ""),
         )
+    elif _mode_simple == "matrix":
+        _new_mapping_simple = render_matrix_form_simple(
+            _sd, pending_id, preview_text, sheets_list,
+            supplier_guess=meta.get("supplier_guess", ""),
+        )
+    elif _mode_simple == "multi_table":
+        _new_mapping_simple = render_multi_table_form_simple(
+            _sd, pending_id, preview_text, sheets_list,
+            supplier_guess=meta.get("supplier_guess", ""),
+        )
+    else:
+        st.info(
+            f"Mode d'extraction '{_mode_simple}' non couvert par le formulaire simplifié "
+            "— utilisez l'onglet « Formulaire avancé » ou « YAML »."
+        )
+        _new_mapping_simple = None
+
+    if _new_mapping_simple is not None:
         _new_yaml_simple = dump_yaml(_new_mapping_simple)
         if _new_yaml_simple != st.session_state.get(yaml_content_key):
             _resp_simple = api_put(
