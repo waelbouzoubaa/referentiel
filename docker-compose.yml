@@ -163,6 +163,11 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.refs-fournisseurs.rule=Host(`refs-fournisseurs.devtools.maikhub.com`)"
+      - "traefik.http.routers.refs-fournisseurs.entrypoints=websecure"
+      - "traefik.http.services.refs-fournisseurs.loadbalancer.server.port=8501"
 
 volumes:
   postgres_data:
