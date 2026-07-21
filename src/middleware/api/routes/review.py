@@ -60,6 +60,7 @@ def list_pending() -> list[dict]:
                 "supplier_guess": data["supplier_guess"],
                 "status": data["status"],
                 "created_at": data["created_at"],
+                "confidence": data.get("confidence"),
             })
         except Exception:
             continue
@@ -225,7 +226,7 @@ def generate_yaml_for_pending(pending_id: str) -> dict:
 
     try:
         from middleware.api.routes.ingest import _inject_sharepoint_folder
-        supplier_guess, yaml_content, initial_prompt = generate_yaml_from_excel(
+        supplier_guess, yaml_content, initial_prompt, confidence = generate_yaml_from_excel(
             file_path=file_path,
             folder_name=meta["folder_name"],
             filename=meta["filename"],
@@ -237,12 +238,17 @@ def generate_yaml_for_pending(pending_id: str) -> dict:
     meta["yaml_proposed"] = yaml_content
     meta["supplier_guess"] = supplier_guess
     meta["initial_prompt"] = initial_prompt
+    meta["confidence"] = confidence
+    meta["confidence_source"] = "ai_generated"
     (PENDING_DIR / f"{pending_id}.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    logger.info("yaml généré par IA à la demande", pending_id=pending_id, supplier=supplier_guess)
+    logger.info(
+        "yaml généré par IA à la demande",
+        pending_id=pending_id, supplier=supplier_guess, confidence=confidence,
+    )
 
-    return {"yaml": yaml_content, "supplier_guess": supplier_guess}
+    return {"yaml": yaml_content, "supplier_guess": supplier_guess, "confidence": confidence}
 
 
 @router.post("/review/{pending_id}/ai-edit", tags=["validation"])

@@ -308,6 +308,24 @@ def _clean_yaml_output(raw: str) -> str:
     return raw.strip()
 
 
+_CONFIDENCE_MARKER = "---CONFIDENCE---"
+
+
+def _split_confidence(raw: str) -> tuple[str, int]:
+    """Sépare le YAML du score de confiance auto-évalué ajouté par l'IA en fin de réponse.
+
+    Repli sur 50 (confiance moyenne, ni optimiste ni pessimiste) si l'IA n'a pas respecté
+    le format demandé — pour ne jamais bloquer la génération sur un défaut de parsing.
+    """
+    if _CONFIDENCE_MARKER not in raw:
+        return raw, 50
+    yaml_part, _, confidence_part = raw.partition(_CONFIDENCE_MARKER)
+    match = re.search(r"\d+", confidence_part)
+    if not match:
+        return yaml_part, 50
+    return yaml_part, max(0, min(100, int(match.group())))
+
+
 def _guess_supplier_code(yaml_text: str, folder_name: str, filename: str) -> str:
     """Extrait le supplier_code du YAML généré, sinon le construit depuis le dossier."""
     match = re.search(r'supplier_code:\s*["\']?([a-z0-9_]+)["\']?', yaml_text)
@@ -321,11 +339,12 @@ def generate_yaml_from_excel(
     file_path: Path,
     folder_name: str,
     filename: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str, int]:
     """Génère un YAML de mapping via Gemini à partir de la structure de l'Excel.
 
     Returns:
-        (supplier_code_guess, yaml_content)
+        (supplier_code_guess, yaml_content, prompt, confidence) — confidence est un
+        entier 0-100 auto-évalué par l'IA (repli sur 50 si elle ne le fournit pas).
     """
     preview = read_excel_preview(file_path)
 
@@ -418,10 +437,28 @@ Dossier SharePoint : {folder_name}
 ## Premières lignes du fichier (Ligne N: colA\\tcolB\\tcolC...) :
 {preview}
 
-Génère UNIQUEMENT le YAML de configuration, sans explications, sans balises markdown."""
+## Auto-évaluation (OBLIGATOIRE, après le YAML) :
+Après le YAML complet, ajoute une ligne EXACTEMENT au format suivant (rien d'autre après) :
+{_CONFIDENCE_MARKER}
+<un entier de 0 à 100>
+
+Ce chiffre reflète TA confiance que ce mapping va extraire correctement les produits et
+prix de ce fichier du premier coup, sans erreur de structure. Sois honnête et critique,
+pas optimiste par défaut :
+- 90-100 : structure simple et sans ambiguïté (ex. table plate, en-têtes évidents en une
+  seule ligne, aucune cellule de cartouche à deviner).
+- 60-89 : structure compréhensible mais avec des zones d'incertitude (ex. cellule de
+  cartouche pas garantie, plusieurs feuilles possibles, mode matrix/multi_table avec
+  plusieurs blocs à interpréter).
+- 0-59 : fichier ambigu, structure inhabituelle, ou tu as dû deviner beaucoup de choses
+  (ex. pas sûr de la ligne d'en-tête, colonnes de prix peu claires, cartouche absent).
+
+Génère le YAML de configuration puis la ligne de confiance, sans explications, sans
+balises markdown, rien d'autre."""
 
     raw = _call_gemini(prompt)
-    yaml_text = _clean_yaml_output(raw)
+    raw_yaml, confidence = _split_confidence(raw)
+    yaml_text = _clean_yaml_output(raw_yaml)
     supplier_code = _guess_supplier_code(yaml_text, folder_name, filename)
 
     logger.info(
@@ -429,8 +466,9 @@ Génère UNIQUEMENT le YAML de configuration, sans explications, sans balises ma
         supplier_guess=supplier_code,
         filename=filename,
         yaml_length=len(yaml_text),
+        confidence=confidence,
     )
-    return supplier_code, yaml_text, prompt
+    return supplier_code, yaml_text, prompt, confidence
 
 
 def edit_yaml_with_ai(current_yaml: str, instruction: str, preview: str = "") -> str:
