@@ -2826,8 +2826,8 @@ with tab_yaml:
             _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
         if _gen_resp.status_code == 200:
             _gen_data = _gen_resp.json()
-            set_yaml_text(_gen_data["yaml"])
             st.session_state[f"ai_confidence_{pending_id}"] = _gen_data.get("confidence")
+            set_yaml_text(_gen_data["yaml"])
         elif _gen_resp.status_code == 404:
             st.error("Fichier source introuvable — impossible de générer le YAML.")
         else:
