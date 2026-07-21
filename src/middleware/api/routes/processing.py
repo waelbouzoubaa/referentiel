@@ -5,12 +5,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException
 
 from middleware.api.schemas import (
     DeltaSummary,
-    GeneratedFileOut,
     GenerateExportsRequest,
     GenerateExportsResponse,
     ProcessFileRequest,
@@ -18,12 +16,11 @@ from middleware.api.schemas import (
 )
 from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
-from middleware.db.session import get_session
 from middleware.delta.engine import compute_delta
 from middleware.parser.grammar import MappingRule
 from middleware.parser.pivot import ParsingResult
 from middleware.parser.yaml_loader import load_all_mappings
-from middleware.pipeline import parse_with_rule, process_and_export
+from middleware.pipeline import parse_with_rule
 
 PENDING_DIR = Path("/app/uploads/pending")
 
@@ -94,14 +91,15 @@ async def process_file(request: ProcessFileRequest) -> ProcessFileResponse:
 @router.post("/generate-gery-exports", response_model=GenerateExportsResponse, tags=["exports"])
 async def generate_gery_exports_endpoint(
     request: GenerateExportsRequest,
-    session: AsyncSession = Depends(get_session),
 ) -> GenerateExportsResponse:
-    """Traite un fichier (parse + delta vs PostgreSQL), persiste et génère le CSV Gery.
+    """Reçoit un fichier d'un fournisseur connu et crée une demande de validation.
 
-    Avant traitement, des contrôles de cohérence vérifient que le YAML s'applique
-    correctement au fichier. Si une anomalie est détectée (0 produit, 0 prix, trop
-    d'erreurs), le fichier est redirigé vers l'UI de validation plutôt que traité
-    en aveugle avec un mauvais YAML.
+    Tout fichier — connu ou non — passe désormais par une validation métier avant
+    export : le YAML connu est proposé comme suggestion (confiance haute), mais
+    l'export réel (DB + CSV Gery) n'est déclenché qu'à l'approbation dans l'UI
+    (voir /review/{id}/approve). Un contrôle de cohérence signale en plus les
+    fichiers qui ne correspondent visiblement plus au YAML connu (0 produit, 0
+    prix, trop d'erreurs) — confiance réduite, alerte affichée dans l'UI.
     """
     path = Path(request.file_path)
     if not path.exists():
@@ -109,53 +107,23 @@ async def generate_gery_exports_endpoint(
 
     rule = _load_rule(request.supplier_code)
 
-    # ── Contrôles de cohérence ────────────────────────────────────────────────
     parse_result = _parse_with_rule(path, rule)
     issues = _check_coherence(parse_result, rule)
 
-    if issues:
-        pending_id = _create_anomaly_review(request, path, rule, issues)
-        logger.warning(
-            "anomalie détectée — routage vers validation manuelle",
-            supplier_code=request.supplier_code,
-            fichier=path.name,
-            issues=issues,
-            pending_id=pending_id,
-        )
-        return GenerateExportsResponse(
-            supplier_code=request.supplier_code,
-            files=[],
-            generated_at=datetime.utcnow(),
-            anomaly_detected=True,
-            anomaly_issues=issues,
-            anomaly_pending_id=pending_id,
-        )
-
-    # ── Traitement normal ─────────────────────────────────────────────────────
-    try:
-        _, _, export_result = await process_and_export(
-            session,
-            rule,
-            path,
-            Path(request.output_dir),
-            original_filename=request.original_filename,
-            sharepoint_item_id=request.sharepoint_item_id,
-        )
-    except ParsingError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
+    pending_id = _create_pending_review(request, path, rule, issues)
+    logger.info(
+        "fichier d'un fournisseur connu routé vers validation métier",
+        supplier_code=request.supplier_code,
+        fichier=path.name,
+        issues=issues,
+        pending_id=pending_id,
+    )
     return GenerateExportsResponse(
         supplier_code=request.supplier_code,
-        files=[
-            GeneratedFileOut(
-                kind=f.kind,
-                path=str(f.path),
-                line_count=f.line_count,
-                output_hash=f.output_hash,
-            )
-            for f in export_result.files
-        ],
-        generated_at=export_result.generated_at,
+        files=[],
+        generated_at=datetime.utcnow(),
+        pending_id=pending_id,
+        pending_issues=issues,
     )
 
 
@@ -190,13 +158,18 @@ def _check_coherence(result: ParsingResult, rule: MappingRule) -> list[str]:
     return issues
 
 
-def _create_anomaly_review(
+def _create_pending_review(
     request: GenerateExportsRequest,
     file_path: Path,
     rule: MappingRule,
     issues: list[str],
 ) -> str:
-    """Crée une demande de révision manuelle visible dans l'UI de validation."""
+    """Crée une demande de validation pour un fichier d'un fournisseur connu.
+
+    Le YAML déjà committé est proposé comme suggestion (confiance haute, réduite
+    si des soucis de cohérence sont détectés) — reste soumis à validation métier,
+    jamais appliqué automatiquement.
+    """
     # Recharge le YAML brut pour l'afficher dans l'UI
     config_dir = Path("config/suppliers")
     yaml_file = config_dir / f"{rule.supplier_code}_v1.yaml"
@@ -215,14 +188,17 @@ def _create_anomaly_review(
         "id": pending_id,
         "created_at": datetime.utcnow().isoformat(),
         "filename": request.original_filename or file_path.name,
-        "folder_name": rule.supplier_code,
+        "folder_name": request.folder_name or rule.supplier_code,
         "file_path": str(saved_path),
         "supplier_guess": rule.supplier_code,
         "yaml_proposed": yaml_content,
         "initial_prompt": "",
-        "web_url": None,
+        "web_url": request.web_url,
+        "sharepoint_item_id": request.sharepoint_item_id,
         "status": "pending",
-        "anomaly": True,
+        "confidence": 60 if issues else 90,
+        "confidence_source": "known_yaml",
+        "anomaly": bool(issues),
         "anomaly_issues": issues,
     }
     (PENDING_DIR / f"{pending_id}.json").write_text(

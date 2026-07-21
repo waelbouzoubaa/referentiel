@@ -89,6 +89,8 @@ class GenerateExportsRequest(BaseModel):
     output_dir: str = "exports"
     original_filename: str | None = None
     sharepoint_item_id: str | None = None
+    folder_name: str | None = None
+    web_url: str | None = None
 
 
 class GeneratedFileOut(BaseModel):
@@ -100,11 +102,10 @@ class GeneratedFileOut(BaseModel):
 
 class GenerateExportsResponse(BaseModel):
     supplier_code: str
-    files: list[GeneratedFileOut]
+    files: list[GeneratedFileOut] = []
     generated_at: datetime
-    anomaly_detected: bool = False
-    anomaly_issues: list[str] = []
-    anomaly_pending_id: str | None = None
+    pending_id: str
+    pending_issues: list[str] = []
 
 
 # ─── Audit ────────────────────────────────────────────────────────────────────

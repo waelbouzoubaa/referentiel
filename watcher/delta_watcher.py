@@ -18,6 +18,14 @@ FILE_CACHE_FILE = Path("file_cache.json")
 _folder_to_suppliers: dict[str, list[dict]] = {}
 
 
+def _folder_name_from_item(item) -> str:
+    """Extrait le nom du dossier SharePoint parent d'un item Graph (delta)."""
+    parent_path = item.get("parentReference", {}).get("path", "")
+    if "root:" in parent_path:
+        return parent_path.split("root:")[-1].strip("/").split("/")[-1]
+    return parent_path.strip("/").split("/")[-1]
+
+
 def _refresh_folder_mapping():
     """Recharge le mapping dossier→fournisseurs depuis le middleware."""
     global _folder_to_suppliers
@@ -146,19 +154,16 @@ def _trigger_middleware(item):
                 "output_dir": "/app/exports",
                 "original_filename": name,
                 "sharepoint_item_id": item.get("id"),
+                "folder_name": _folder_name_from_item(item),
+                "web_url": item.get("webUrl"),
             },
             timeout=120,
         )
         resp.raise_for_status()
         data = resp.json()
-        if data.get("anomaly_detected"):
-            print(f"  → ⚠️  ANOMALIE DÉTECTÉE — routé vers validation manuelle (ID: {data.get('anomaly_pending_id')})")
-            for issue in data.get("anomaly_issues", []):
-                print(f"     ! {issue}")
-        else:
-            print(f"  → OK : {len(data.get('files', []))} fichier(s) Gery généré(s).")
-            for f in data.get("files", []):
-                print(f"     • {f['kind']} — {f['line_count']} ligne(s)")
+        print(f"  → Envoyé pour validation métier (ID: {data.get('pending_id')})")
+        for issue in data.get("pending_issues", []):
+            print(f"     ! {issue}")
     except requests.HTTPError as exc:
         print(f"  → Erreur HTTP {exc.response.status_code} : {exc.response.text[:300]}")
     except requests.ConnectionError:
@@ -194,11 +199,7 @@ def _download_file(item) -> bytes:
 def _handle_unknown_supplier(item):
     """Fournisseur inconnu : télécharge le fichier et l'envoie pour analyse IA + validation humaine."""
     name = item.get("name", "inconnu")
-    parent_path = item.get("parentReference", {}).get("path", "")
-    if "root:" in parent_path:
-        folder = parent_path.split("root:")[-1].strip("/").split("/")[-1]
-    else:
-        folder = parent_path.strip("/").split("/")[-1]
+    folder = _folder_name_from_item(item)
 
     print(f"  → Fournisseur inconnu pour '{name}' (dossier: '{folder}') — analyse IA en cours...")
 
@@ -244,11 +245,7 @@ def _resolve_supplier_code(item) -> str | None:
     pour choisir le bon. Sans keywords → s'applique à tous les fichiers du dossier.
     """
     name = item.get("name", "").lower()
-    parent_path = item.get("parentReference", {}).get("path", "")
-    if "root:" in parent_path:
-        folder = parent_path.split("root:")[-1].strip("/").split("/")[-1]
-    else:
-        folder = parent_path.strip("/").split("/")[-1]
+    folder = _folder_name_from_item(item)
 
     candidates = _folder_to_suppliers.get(folder.lower(), [])
     if not candidates:
