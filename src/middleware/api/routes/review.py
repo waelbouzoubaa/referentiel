@@ -210,15 +210,77 @@ class AiEditRequest(BaseModel):
     instruction: str
 
 
-@router.get("/review/{pending_id}/generate-yaml", tags=["validation"])
-def generate_yaml_for_pending(pending_id: str) -> dict:
-    """Déclenche la génération IA du YAML pour un fichier en attente (à la demande).
+def _resolve_known_yaml(folder_name: str, filename: str) -> tuple[str, str] | None:
+    """Cherche un YAML déjà committé correspondant à ce dossier/fichier.
 
-    Met à jour le pending JSON avec le YAML généré et le supplier_guess.
+    Reproduit la résolution du watcher (`_resolve_supplier_code`) : un YAML avec
+    `filename_keywords` matchant le nom du fichier est prioritaire, sinon le YAML
+    « joker » (sans keywords) du dossier s'applique.
+
+    Returns:
+        (supplier_code, yaml_content) si un YAML connu correspond, sinon None.
+    """
+    from middleware.parser.yaml_loader import load_all_mappings
+
+    mappings = load_all_mappings(CONFIG_DIR)
+    folder_lower = (folder_name or "").lower()
+    name_lower = (filename or "").lower()
+
+    matched_with_keywords = None
+    fallback = None
+    for rule in mappings.values():
+        if folder_lower not in [f.lower() for f in rule.resolved_sharepoint_folders()]:
+            continue
+        if rule.filename_keywords:
+            if any(kw.lower() in name_lower for kw in rule.filename_keywords):
+                matched_with_keywords = rule
+        else:
+            fallback = fallback or rule
+
+    chosen = matched_with_keywords or fallback
+    if chosen is None:
+        return None
+    yaml_file = CONFIG_DIR / f"{chosen.supplier_code}_v1.yaml"
+    if not yaml_file.exists():
+        return None
+    return chosen.supplier_code, yaml_file.read_text(encoding="utf-8")
+
+
+@router.get("/review/{pending_id}/generate-yaml", tags=["validation"])
+def generate_yaml_for_pending(pending_id: str, force: bool = False) -> dict:
+    """Propose un YAML de mapping pour un fichier en attente (à la demande).
+
+    Par défaut, si un YAML déjà committé correspond au dossier/fichier, il est
+    réutilisé tel quel comme suggestion (confiance haute) — il reste néanmoins
+    soumis à validation, il n'est jamais appliqué automatiquement. `force=true`
+    ignore ce YAML connu et force une génération IA fraîche (Gemini).
     """
     meta = _load_pending(pending_id)
     if meta["status"] != "pending":
         raise HTTPException(status_code=409, detail=f"Cette demande a déjà été {meta['status']}.")
+
+    if not force:
+        known = _resolve_known_yaml(meta["folder_name"], meta["filename"])
+        if known is not None:
+            supplier_code, yaml_content = known
+            meta["yaml_proposed"] = yaml_content
+            meta["supplier_guess"] = supplier_code
+            meta["initial_prompt"] = ""
+            meta["confidence"] = 95
+            meta["confidence_source"] = "reused_known"
+            (PENDING_DIR / f"{pending_id}.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            logger.info(
+                "yaml connu réutilisé comme suggestion",
+                pending_id=pending_id, supplier=supplier_code,
+            )
+            return {
+                "yaml": yaml_content,
+                "supplier_guess": supplier_code,
+                "confidence": 95,
+                "confidence_source": "reused_known",
+            }
 
     file_path = Path(meta.get("file_path", ""))
     if not file_path.exists():
@@ -248,7 +310,12 @@ def generate_yaml_for_pending(pending_id: str) -> dict:
         pending_id=pending_id, supplier=supplier_guess, confidence=confidence,
     )
 
-    return {"yaml": yaml_content, "supplier_guess": supplier_guess, "confidence": confidence}
+    return {
+        "yaml": yaml_content,
+        "supplier_guess": supplier_guess,
+        "confidence": confidence,
+        "confidence_source": "ai_generated",
+    }
 
 
 @router.post("/review/{pending_id}/ai-edit", tags=["validation"])

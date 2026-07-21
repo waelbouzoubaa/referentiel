@@ -2815,31 +2815,50 @@ with tab_yaml:
     # ── Générer le YAML avec l'IA (à la demande) ─────────────────────────
     if f"ai_confidence_{pending_id}" not in st.session_state:
         st.session_state[f"ai_confidence_{pending_id}"] = meta.get("confidence")
+        st.session_state[f"ai_confidence_source_{pending_id}"] = meta.get("confidence_source")
 
-    if st.button(
-        "🤖 Générer avec l'IA",
-        key=f"gen_ai_{pending_id}",
-        help="Analyse le fichier et génère un mapping YAML automatiquement.",
-    ):
-        with st.spinner("L'IA analyse le fichier…"):
-            _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
-        if _gen_resp.status_code == 200:
-            _gen_data = _gen_resp.json()
-            set_yaml_text(_gen_data["yaml"])
-            st.session_state[f"ai_confidence_{pending_id}"] = _gen_data.get("confidence")
-        elif _gen_resp.status_code == 404:
+    def _call_generate_yaml(force: bool):
+        with st.spinner(
+            "L'IA analyse le fichier…" if force else "Recherche d'une suggestion…"
+        ):
+            resp = api_get(
+                f"/api/v1/review/{pending_id}/generate-yaml?force={'true' if force else 'false'}"
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            set_yaml_text(data["yaml"])
+            st.session_state[f"ai_confidence_{pending_id}"] = data.get("confidence")
+            st.session_state[f"ai_confidence_source_{pending_id}"] = data.get("confidence_source")
+        elif resp.status_code == 404:
             st.error("Fichier source introuvable — impossible de générer le YAML.")
         else:
-            st.error(f"Erreur IA ({_gen_resp.status_code}) : {_gen_resp.text[:200]}")
+            st.error(f"Erreur IA ({resp.status_code}) : {resp.text[:200]}")
+
+    _has_suggestion = st.session_state.get(f"ai_confidence_{pending_id}") is not None
+    _gen_label = "🔄 Régénérer avec l'IA" if _has_suggestion else "🤖 Générer avec l'IA"
+    _gen_help = (
+        "Ignore la suggestion actuelle (YAML connu réutilisé ou génération précédente) "
+        "et redemande une génération IA fraîche."
+        if _has_suggestion else
+        "Réutilise un YAML déjà validé pour ce dossier s'il y en a un, sinon appelle "
+        "l'IA pour en générer un nouveau."
+    )
+    if st.button(_gen_label, key=f"gen_ai_{pending_id}", help=_gen_help):
+        _call_generate_yaml(force=_has_suggestion)
 
     _ai_confidence = st.session_state.get(f"ai_confidence_{pending_id}")
+    _ai_source = st.session_state.get(f"ai_confidence_source_{pending_id}")
     if _ai_confidence is not None:
+        _label = (
+            "YAML déjà connu réutilisé" if _ai_source == "reused_known" else "Généré par l'IA"
+        )
+        _msg = f"💡 Suggestion — {_label} · confiance : **{_ai_confidence}%**"
         if _ai_confidence >= 70:
-            st.success(f"💡 Confiance de l'IA dans ce mapping : **{_ai_confidence}%**")
+            st.success(_msg)
         elif _ai_confidence >= 40:
-            st.warning(f"💡 Confiance de l'IA dans ce mapping : **{_ai_confidence}%**")
+            st.warning(_msg)
         else:
-            st.error(f"💡 Confiance de l'IA dans ce mapping : **{_ai_confidence}%**")
+            st.error(_msg)
 
     def _sync_yaml_content():
         st.session_state[yaml_content_key] = st.session_state.get(yaml_key, "")
