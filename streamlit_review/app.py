@@ -2813,6 +2813,9 @@ with tab_yaml:
                     st.error(f"Erreur : {_exc}")
 
     # ── Générer le YAML avec l'IA (à la demande) ─────────────────────────
+    if f"ai_confidence_{pending_id}" not in st.session_state:
+        st.session_state[f"ai_confidence_{pending_id}"] = meta.get("confidence")
+
     if st.button(
         "🤖 Générer avec l'IA",
         key=f"gen_ai_{pending_id}",
@@ -2821,11 +2824,22 @@ with tab_yaml:
         with st.spinner("L'IA analyse le fichier…"):
             _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
         if _gen_resp.status_code == 200:
-            set_yaml_text(_gen_resp.json()["yaml"])
+            _gen_data = _gen_resp.json()
+            set_yaml_text(_gen_data["yaml"])
+            st.session_state[f"ai_confidence_{pending_id}"] = _gen_data.get("confidence")
         elif _gen_resp.status_code == 404:
             st.error("Fichier source introuvable — impossible de générer le YAML.")
         else:
             st.error(f"Erreur IA ({_gen_resp.status_code}) : {_gen_resp.text[:200]}")
+
+    _ai_confidence = st.session_state.get(f"ai_confidence_{pending_id}")
+    if _ai_confidence is not None:
+        if _ai_confidence >= 70:
+            st.success(f"💡 Confiance de l'IA dans ce mapping : **{_ai_confidence}%**")
+        elif _ai_confidence >= 40:
+            st.warning(f"💡 Confiance de l'IA dans ce mapping : **{_ai_confidence}%**")
+        else:
+            st.error(f"💡 Confiance de l'IA dans ce mapping : **{_ai_confidence}%**")
 
     def _sync_yaml_content():
         st.session_state[yaml_content_key] = st.session_state.get(yaml_key, "")
