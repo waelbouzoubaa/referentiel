@@ -61,6 +61,7 @@ def list_pending() -> list[dict]:
                 "status": data["status"],
                 "created_at": data["created_at"],
                 "confidence": data.get("confidence"),
+                "escalated": data.get("escalated", False),
             })
         except Exception:
             continue
@@ -106,6 +107,26 @@ def update_pending_yaml(pending_id: str, request: UpdateYamlRequest) -> UpdateYa
     logger.info("yaml édité sauvegardé", pending_id=pending_id, supplier_code=rule.supplier_code)
 
     return UpdateYamlResponse(ok=True, supplier_code=rule.supplier_code)
+
+
+class EscalateRequest(BaseModel):
+    escalated: bool = True
+
+
+@router.post("/review/{pending_id}/escalate", tags=["validation"])
+def escalate_pending(pending_id: str, request: EscalateRequest) -> dict:
+    """Marque (ou démarque) une demande comme nécessitant l'aide du support (dev).
+
+    Signalement orthogonal au statut d'approbation — n'empêche pas de valider ou
+    rejeter, sert juste à repérer les cas où le métier a besoin d'aide.
+    """
+    meta = _load_pending(pending_id)
+    meta["escalated"] = request.escalated
+    (PENDING_DIR / f"{pending_id}.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    logger.info("statut d'escalade modifié", pending_id=pending_id, escalated=request.escalated)
+    return {"ok": True, "escalated": request.escalated}
 
 
 @router.get("/review/{pending_id}/preview", tags=["validation"])

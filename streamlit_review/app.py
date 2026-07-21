@@ -2643,7 +2643,8 @@ if not filtered:
 selected_idx = st.sidebar.radio(
     "Demandes",
     options=range(len(filtered)),
-    format_func=lambda i: "{}\n{}".format(
+    format_func=lambda i: "{}{}\n{}".format(
+        "🆘 " if filtered[i].get("escalated") else "",
         filtered[i]["supplier_guess"].replace("_", " ").title(),
         filtered[i]["filename"][:32] + "…" if len(filtered[i]["filename"]) > 32 else filtered[i]["filename"],
     ),
@@ -2663,6 +2664,48 @@ c3.markdown(
     unsafe_allow_html=True,
 )
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
+
+# ── Stepper de la pipeline ───────────────────────────────────────────────────
+_yaml_mode = load_yaml(meta.get("yaml_proposed") or "").get("extraction_mode")
+_confidence_val = meta.get("confidence")
+_step1_done = bool((meta.get("yaml_proposed") or "").strip())
+_step3_done = meta["status"] == "approved"
+
+
+def _step_html(label: str, done: bool, current: bool) -> str:
+    icon = "✅" if done else ("🔵" if current else "⚪")
+    style = "font-weight:600;" if current else "color:#999;"
+    return f'<span style="{style}">{icon} {label}</span>'
+
+
+st.markdown(
+    "&nbsp;➜&nbsp;".join([
+        _step_html("① Suggestion IA", _step1_done, not _step1_done),
+        _step_html("② Validation métier", _step3_done, _step1_done and not _step3_done),
+        _step_html("③ Export généré", _step3_done, False),
+    ]),
+    unsafe_allow_html=True,
+)
+
+_gauge_col, _diff_col, _esc_col = st.columns([2, 1, 3])
+with _gauge_col:
+    if _confidence_val is not None:
+        st.caption(f"💡 Confiance de la suggestion : {_confidence_val}%")
+        st.progress(max(0, min(100, int(_confidence_val))) / 100)
+with _diff_col:
+    if _yaml_mode:
+        _is_complicated = _yaml_mode in ("matrix", "multi_table") or (
+            _confidence_val is not None and _confidence_val < 70
+        )
+        st.caption("🟠 Compliqué" if _is_complicated else "🟢 Simple")
+with _esc_col:
+    _escalated = bool(meta.get("escalated"))
+    _esc_label = "✅ Retirer de la file support" if _escalated else "🆘 Demander l'aide du support"
+    if st.button(_esc_label, key=f"escalate_btn_{pending_id}"):
+        api_post(f"/api/v1/review/{pending_id}/escalate", {"escalated": not _escalated})
+        st.rerun()
+    if _escalated:
+        st.caption("🆘 Cette demande est signalée au support.")
 
 sheets_key = f"sheets_list_{pending_id}"
 if sheets_key not in st.session_state:
