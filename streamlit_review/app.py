@@ -746,43 +746,53 @@ def _source_field(
     current_source: str,
     current_value: str,
     extra_render=None,
+    use_expander: bool = True,
 ):
     """Bloc 'nom de colonne Gery + sélecteur de source + champ dépendant'.
+
+    Affiché dans un expander repliable par défaut (une section par colonne, comme
+    les tableaux du formulaire multi_table) — passe use_expander=False si ce champ
+    est déjà à l'intérieur d'un autre expander (Streamlit interdit les expanders
+    imbriqués).
 
     Returns:
         (type_source, valeur, extra) — extra = résultat de extra_render (ex: format de date).
     """
-    st.markdown(f"**{gery_label}**")
-    if help_text:
-        st.caption(help_text)
-    left, right = st.columns([1, 2])
-    idx = allowed_sources.index(current_source) if current_source in allowed_sources else 0
-    source = left.selectbox(
-        "Source", allowed_sources, index=idx,
-        key=f"{field_id}_src_{pending_id}", label_visibility="collapsed",
-    )
-    value = ""
-    extra = None
-    if source == _SRC_COLUMN:
-        value = _pick_column_widget(
-            right, "Colonne", columns, current_value, key=f"{field_id}_col_{pending_id}"
+    container = st.expander(gery_label, expanded=True) if use_expander else st.container()
+    with container:
+        if not use_expander:
+            st.markdown(f"**{gery_label}**")
+        if help_text:
+            st.caption(help_text)
+        left, right = st.columns([1, 2])
+        idx = allowed_sources.index(current_source) if current_source in allowed_sources else 0
+        source = left.selectbox(
+            "Source", allowed_sources, index=idx,
+            key=f"{field_id}_src_{pending_id}", label_visibility="collapsed",
         )
-    elif source == _SRC_CELL:
-        value = right.text_input(
-            "Cellule (ex: C4)", value=current_value, key=f"{field_id}_cell_{pending_id}"
-        )
-        if extra_render:
-            extra = extra_render(right, field_id)
-    elif source == _SRC_FIXED:
-        value = right.text_input(
-            "Valeur", value=current_value, key=f"{field_id}_fixed_{pending_id}"
-        )
-    elif source == _SRC_TEMPLATE:
-        value = right.text_input(
-            "Modèle (ex: {designation} | EP{epaisseur})",
-            value=current_value, key=f"{field_id}_tpl_{pending_id}",
-        )
-    st.divider()
+        value = ""
+        extra = None
+        if source == _SRC_COLUMN:
+            value = _pick_column_widget(
+                right, "Colonne", columns, current_value, key=f"{field_id}_col_{pending_id}"
+            )
+        elif source == _SRC_CELL:
+            value = right.text_input(
+                "Cellule (ex: C4)", value=current_value, key=f"{field_id}_cell_{pending_id}"
+            )
+            if extra_render:
+                extra = extra_render(right, field_id)
+        elif source == _SRC_FIXED:
+            value = right.text_input(
+                "Valeur", value=current_value, key=f"{field_id}_fixed_{pending_id}"
+            )
+        elif source == _SRC_TEMPLATE:
+            value = right.text_input(
+                "Modèle (ex: {designation} | EP{epaisseur})",
+                value=current_value, key=f"{field_id}_tpl_{pending_id}",
+            )
+        if not use_expander:
+            st.divider()
     return source, value.strip() if isinstance(value, str) else value, extra
 
 
@@ -981,7 +991,7 @@ def render_table_form_simple(
         family_src, family_val, _ = _source_field(
             "Famille", "",
             pending_id, "family", [_SRC_COLUMN, _SRC_FIXED, _SRC_NONE], columns,
-            family_current[0], family_current[1],
+            family_current[0], family_current[1], use_expander=False,
         )
         subfamily_current = (
             (_SRC_COLUMN, (existing_columns.get("subfamily") or {}).get("source_col") or "")
@@ -993,7 +1003,7 @@ def render_table_form_simple(
         subfamily_src, subfamily_val, _ = _source_field(
             "Sous-famille", "",
             pending_id, "subfamily", [_SRC_COLUMN, _SRC_FIXED, _SRC_NONE], columns,
-            subfamily_current[0], subfamily_current[1],
+            subfamily_current[0], subfamily_current[1], use_expander=False,
         )
         row_filter = data.get("row_filter") or {}
         exclude_starts_str = st.text_input(
@@ -2246,6 +2256,7 @@ def render_multi_table_form_simple(
                     pending_id, f"mt_price_{i}", [_SRC_COLUMN], table_columns,
                     _SRC_COLUMN,
                     (t.get("prices") or [{}])[0].get("source_col", "") if t.get("prices") else "",
+                    use_expander=False,
                 )
 
             st.markdown("**Attributs techniques** *(optionnel — ex: temps max en durée)*")
