@@ -2918,25 +2918,46 @@ with tab_simple:
     _sd = load_yaml(st.session_state[yaml_key])
     _mode_simple = _sd.get("extraction_mode", "table")
 
+    # Si le YAML affiché a changé depuis la dernière fois que CE formulaire l'a
+    # lui-même produit (génération IA, édition manuelle du YAML, chargement d'un
+    # YAML existant, assistant IA...), on change l'espace de noms des widgets pour
+    # qu'ils repartent de zéro sur les nouvelles valeurs. Sans ça : Streamlit
+    # exécute le code de TOUS les onglets à chaque rerun (pas seulement celui
+    # affiché), donc ce formulaire s'auto-sauvegarde même quand on est sur l'onglet
+    # YAML — avec des dropdowns encore sur les anciennes valeurs, il écrasait
+    # silencieusement tout YAML fraîchement généré par l'IA avec sa reconstruction
+    # basée sur les vieux champs.
+    _simple_last_output_key = f"simple_last_output_{pending_id}"
+    _simple_version_key = f"simple_widget_version_{pending_id}"
+    _current_yaml_text = st.session_state[yaml_key]
+    if _simple_version_key not in st.session_state:
+        st.session_state[_simple_version_key] = 0
+    if (
+        _simple_last_output_key in st.session_state
+        and st.session_state[_simple_last_output_key] != _current_yaml_text
+    ):
+        st.session_state[_simple_version_key] += 1
+    _widget_ns = f"{pending_id}__v{st.session_state[_simple_version_key]}"
+
     if _mode_simple == "table":
         _guess_header_row = (
-            st.session_state.get(f"data_starts_simple_{pending_id}")
+            st.session_state.get(f"data_starts_simple_{_widget_ns}")
             or _sd.get("data_starts_row")
             or 2
         )
         _detected_cols_simple = parse_detected_columns(preview_text, int(_guess_header_row) - 1)
         _new_mapping_simple = render_table_form_simple(
-            _sd, pending_id, _detected_cols_simple, sheets_list,
+            _sd, _widget_ns, _detected_cols_simple, sheets_list,
             supplier_guess=meta.get("supplier_guess", ""),
         )
     elif _mode_simple == "matrix":
         _new_mapping_simple = render_matrix_form_simple(
-            _sd, pending_id, preview_text, sheets_list,
+            _sd, _widget_ns, preview_text, sheets_list,
             supplier_guess=meta.get("supplier_guess", ""),
         )
     elif _mode_simple == "multi_table":
         _new_mapping_simple = render_multi_table_form_simple(
-            _sd, pending_id, preview_text, sheets_list,
+            _sd, _widget_ns, preview_text, sheets_list,
             supplier_guess=meta.get("supplier_guess", ""),
         )
     else:
@@ -2948,6 +2969,7 @@ with tab_simple:
 
     if _new_mapping_simple is not None:
         _new_yaml_simple = dump_yaml(_new_mapping_simple)
+        st.session_state[_simple_last_output_key] = _new_yaml_simple
         if _new_yaml_simple != st.session_state.get(yaml_content_key):
             _resp_simple = api_put(
                 f"/api/v1/review/{pending_id}", {"yaml_content": _new_yaml_simple}
