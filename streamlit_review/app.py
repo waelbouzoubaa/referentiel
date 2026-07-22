@@ -173,8 +173,8 @@ def status_badge(status: str) -> str:
 
 # ─── Helpers API ────────────────────────────────────────────────────────────
 
-def api_get(path: str) -> httpx.Response:
-    return httpx.get(f"{API_URL}{path}", timeout=30)
+def api_get(path: str, timeout: float = 30) -> httpx.Response:
+    return httpx.get(f"{API_URL}{path}", timeout=timeout)
 
 
 def api_put(path: str, json_body: dict[str, Any]) -> httpx.Response:
@@ -2879,7 +2879,7 @@ with tab_yaml:
              "réel à chaque clic).",
     ):
         with st.spinner("L'IA analyse le fichier…"):
-            _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml")
+            _gen_resp = api_get(f"/api/v1/review/{pending_id}/generate-yaml", timeout=120)
         if _gen_resp.status_code == 200:
             _gen_data = _gen_resp.json()
             st.session_state[f"ai_confidence_{pending_id}"] = _gen_data.get("confidence")
