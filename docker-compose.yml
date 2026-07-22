@@ -157,17 +157,23 @@ services:
       MIDDLEWARE_API_URL: http://api:8000
     volumes:
       - ./docs:/app/docs:ro
-    ports:
-      - "8503:8501"
+    #ports:
+    #  - "8503:8501"
     depends_on:
       api:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - default
+      - infra_networks
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.refs-fournisseurs.rule=Host(`refs-fournisseurs.devtools.maikhub.com`)"
+      - "traefik.http.routers.refs-fournisseurs.rule=Host(`refs-fournisseurs.${MAIN_DOMAIN}`)"
       - "traefik.http.routers.refs-fournisseurs.entrypoints=websecure"
       - "traefik.http.services.refs-fournisseurs.loadbalancer.server.port=8501"
+      - "traefik.http.routers.refs-fournisseurs.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.refs-fournisseurs.middlewares=ip-allowlist@docker"
+      - "traefik.http.middlewares.ip-allowlist.ipallowlist.sourcerange=130.180.219.24/32,82.96.153.97/32"
 
 volumes:
   postgres_data:
@@ -180,3 +186,5 @@ volumes:
 networks:
   default:
     name: middleware-network
+  infra_networks:
+    external: true
