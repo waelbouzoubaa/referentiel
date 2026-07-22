@@ -63,10 +63,11 @@ st.markdown(
     }
     [data-testid="stSidebar"] * { color: #FFFFFF !important; }
     [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.22); }
-    /* Radios de la sidebar : masque le rond natif (classe relevée par inspection
-       DOM directe — st-emotion-cache-1fuixhc, peut changer si Streamlit est mis à
-       jour) ; sélection = pastille pleine moderne via border-left ci-dessous */
-    [data-testid="stSidebar"] .st-emotion-cache-1fuixhc {
+    /* Radios de la sidebar : masque le rond natif, non sélectionné ET sélectionné
+       (classes relevées par inspection DOM directe — peuvent changer si Streamlit
+       est mis à jour) ; sélection = pastille pleine moderne via border-left ci-dessous */
+    [data-testid="stSidebar"] .st-emotion-cache-1fuixhc,
+    [data-testid="stSidebar"] .st-emotion-cache-58bfu0 {
         display: none !important;
     }
     [data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
