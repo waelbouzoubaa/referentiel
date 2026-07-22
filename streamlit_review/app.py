@@ -52,20 +52,40 @@ st.markdown(
     }
     body, .stMarkdown p, label { color: #4A4A49; }
 
-    /* En-tête sobre (filet bleu, pas d'aplat) */
-    .app-header {
-        display: flex; align-items: center; gap: 16px;
-        padding: 2px 0 14px; margin-bottom: 20px;
-        border-bottom: 2px solid #003D7C;
+    /* Page principale : fond blanc explicite */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background: #FFFFFF;
     }
-    .app-header .wordmark {
-        font-size: 28px; font-weight: 700; color: #003D7C; letter-spacing: .5px;
+
+    /* ── Sidebar : bleu Ramery, modernisée ──────────────────────────────── */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #003D7C 0%, #00295C 100%);
     }
-    .app-header .wordmark .dot { color: #D41317; }
-    .app-header .titles .t {
-        font-size: 15px; font-weight: 600; color: #003D7C; line-height: 1.2;
+    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
+    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.22); }
+    [data-testid="stSidebar"] [data-baseweb="radio"] div:first-child {
+        border-color: rgba(255,255,255,.6) !important;
     }
-    .app-header .titles .s { font-size: 12.5px; color: #4A4A49; }
+    [data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
+        padding: 6px 10px; border-radius: 8px; transition: background .15s;
+    }
+    [data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
+        background: rgba(255,255,255,.08);
+    }
+
+    /* En-tête de marque en haut de la sidebar : logo rond + nom */
+    .sidebar-header {
+        display: flex; flex-direction: column; align-items: center; gap: 10px;
+        padding: 6px 0 18px; margin-bottom: 10px;
+        border-bottom: 1px solid rgba(255,255,255,.25);
+    }
+    .sidebar-header img {
+        border-radius: 50%; border: 2px solid rgba(255,255,255,.4);
+    }
+    .sidebar-header .wordmark {
+        font-size: 16px; font-weight: 700; color: #FFFFFF !important;
+        text-align: center; letter-spacing: .3px; line-height: 1.3;
+    }
 
     /* Boutons : bleu Ramery, sobres */
     .stButton > button, .stDownloadButton > button {
@@ -76,6 +96,14 @@ st.markdown(
     }
     .stButton > button[kind="primary"]:hover,
     .stDownloadButton > button:hover { background: #002B58; border-color: #002B58; color: #FFFFFF; }
+
+    /* Cartes métriques (Fournisseur deviné, Dossier, Créé le…) : taille sobre */
+    [data-testid="stMetricLabel"] {
+        font-size: 12.5px !important; font-weight: 500 !important; color: #4A4A49 !important;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 20px !important; font-weight: 700 !important; color: #003D7C !important;
+    }
 
     /* Badges de statut (teintes légères, pas d'aplats lourds) */
     .badge { display: inline-block; padding: 2px 12px; border-radius: 999px;
@@ -100,22 +128,18 @@ def _logo_data_uri() -> str:
         return ""
 
 
-def render_header() -> None:
-    """En-tête de marque sobre (charte Ramery) : logo + nom + titre applicatif."""
+def render_sidebar_header() -> None:
+    """En-tête de marque en haut de la sidebar : logo rond + nom du référentiel."""
     logo = _logo_data_uri()
     logo_html = (
-        f'<img src="{logo}" alt="Ramery" style="height:44px;width:44px;'
-        f'border-radius:8px;object-fit:cover"/>' if logo else ""
+        f'<img src="{logo}" alt="Ramery" style="height:60px;width:60px;object-fit:cover"/>'
+        if logo else ""
     )
-    st.markdown(
+    st.sidebar.markdown(
         f"""
-        <div class="app-header">
+        <div class="sidebar-header">
           {logo_html}
-          <span class="wordmark">Ramery</span>
-          <div class="titles">
-            <div class="t">Référentiel fournisseurs</div>
-            <div class="s">Normalisation des catalogues &rarr; export Gery</div>
-          </div>
+          <div class="wordmark">Référentiel Ramery</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2600,7 +2624,7 @@ FORM_RENDERERS = {
 
 # ─── Application ────────────────────────────────────────────────────────────
 
-render_header()
+render_sidebar_header()
 
 vue = st.sidebar.radio("Vue", ["Validation des mappings", "Exports Gery", "❓ Aide"])
 if vue == "Exports Gery":
