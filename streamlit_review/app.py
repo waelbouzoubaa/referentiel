@@ -829,44 +829,42 @@ def render_table_form_simple(
     )
 
     # ── Repérage dans le fichier ────────────────────────────────────────────
-    st.markdown("##### 📍 Où sont les données dans le fichier ?")
-    c1, c2 = st.columns(2)
-    current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
-    sheet_options = sheets or ([current_sheet] if current_sheet else [])
-    if sheet_options:
-        idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
-        sheet_match = c1.selectbox(
-            "Feuille Excel", sheet_options, index=idx, key=f"sheet_simple_{pending_id}"
-        )
-    else:
-        sheet_match = c1.text_input(
-            "Feuille Excel", value=current_sheet or "", key=f"sheet_simple_{pending_id}"
-        )
+    with st.expander("📍 Où sont les données dans le fichier ?", expanded=True):
+        c1, c2 = st.columns(2)
+        current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
+        sheet_options = sheets or ([current_sheet] if current_sheet else [])
+        if sheet_options:
+            idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
+            sheet_match = c1.selectbox(
+                "Feuille Excel", sheet_options, index=idx, key=f"sheet_simple_{pending_id}"
+            )
+        else:
+            sheet_match = c1.text_input(
+                "Feuille Excel", value=current_sheet or "", key=f"sheet_simple_{pending_id}"
+            )
 
-    data_starts_row = c2.number_input(
-        "À quelle ligne commencent les produits ?",
-        min_value=2, step=1,
-        value=int(data.get("data_starts_row") or 2),
-        key=f"data_starts_simple_{pending_id}",
-        help="La ligne juste au-dessus est utilisée comme ligne d'en-têtes.",
-    )
-    supplier_code = st.text_input(
-        "Code fournisseur *(obligatoire — identifiant interne, sans espace ni accent)*",
-        value=data.get("supplier_code") or supplier_guess or "",
-        key=f"supplier_code_simple_{pending_id}",
-    )
-    if not supplier_code.strip():
-        st.warning(
-            "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés "
-            "tant que ce champ n'est pas rempli."
+        data_starts_row = c2.number_input(
+            "À quelle ligne commencent les produits ?",
+            min_value=2, step=1,
+            value=int(data.get("data_starts_row") or 2),
+            key=f"data_starts_simple_{pending_id}",
+            help="La ligne juste au-dessus est utilisée comme ligne d'en-têtes.",
         )
+        supplier_code = st.text_input(
+            "Code fournisseur *(obligatoire — identifiant interne, sans espace ni accent)*",
+            value=data.get("supplier_code") or supplier_guess or "",
+            key=f"supplier_code_simple_{pending_id}",
+        )
+        if not supplier_code.strip():
+            st.warning(
+                "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés "
+                "tant que ce champ n'est pas rempli."
+            )
 
-    st.divider()
     st.markdown("##### 🧾 Colonnes de l'export Gery")
 
-    st.markdown("**Code Fournisseur SAGE**")
-    st.caption("🔒 Résolu automatiquement à partir du code fournisseur — non modifiable ici.")
-    st.divider()
+    with st.expander("Code Fournisseur SAGE", expanded=True):
+        st.caption("🔒 Résolu automatiquement à partir du code fournisseur — non modifiable ici.")
 
     _, code_col, _ = _source_field(
         "Code article Frns *(obligatoire)*", "",
@@ -936,14 +934,13 @@ def render_table_form_simple(
     )
     date_fmt = date_fmt or ve_date_fmt or "parse_date_fr"
 
-    st.markdown("**Minimum Quantity**")
-    st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
-    min_qty = st.number_input(
-        "Quantité minimum", min_value=1, step=1,
-        value=int(defaults.get("minimum_quantity") or 1),
-        key=f"min_qty_simple_{pending_id}", label_visibility="collapsed",
-    )
-    st.divider()
+    with st.expander("Minimum Quantity", expanded=True):
+        st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
+        min_qty = st.number_input(
+            "Quantité minimum", min_value=1, step=1,
+            value=int(defaults.get("minimum_quantity") or 1),
+            key=f"min_qty_simple_{pending_id}", label_visibility="collapsed",
+        )
 
     def _decimal_format_picker(container):
         options = {
@@ -959,18 +956,17 @@ def render_table_form_simple(
         )
         return options[chosen]
 
-    st.markdown("**Direct Unit Cost** *(obligatoire)*")
-    left, right = st.columns([1, 2])
-    left.selectbox(
-        "Source", [_SRC_COLUMN], index=0,
-        key=f"price_src_{pending_id}", label_visibility="collapsed", disabled=True,
-    )
-    price_col = _pick_column_widget(
-        right, "Colonne", columns, current_price.get("source_col") or "",
-        key=f"price_col_{pending_id}",
-    )
-    decimal_fmt = _decimal_format_picker(right)
-    st.divider()
+    with st.expander("Direct Unit Cost (obligatoire)", expanded=True):
+        left, right = st.columns([1, 2])
+        left.selectbox(
+            "Source", [_SRC_COLUMN], index=0,
+            key=f"price_src_{pending_id}", label_visibility="collapsed", disabled=True,
+        )
+        price_col = _pick_column_widget(
+            right, "Colonne", columns, current_price.get("source_col") or "",
+            key=f"price_col_{pending_id}",
+        )
+        decimal_fmt = _decimal_format_picker(right)
 
     siren_current = (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "") \
         if file_metadata.get("siren_fournisseur") else (_SRC_NONE, "")
@@ -1423,68 +1419,67 @@ def render_matrix_form_simple(
     existing_groups = pm.get("column_groups") or []
 
     # ── Repérage dans le fichier ────────────────────────────────────────────
-    st.markdown("##### 📍 Où sont les données dans le fichier ?")
-    c1, c2 = st.columns(2)
-    current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
-    sheet_options = sheets or ([current_sheet] if current_sheet else [])
-    if sheet_options:
-        idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
-        sheet_match = c1.selectbox(
-            "Feuille Excel", sheet_options, index=idx, key=f"sheet_matrix_{pending_id}"
+    with st.expander("📍 Où sont les données dans le fichier ?", expanded=True):
+        c1, c2 = st.columns(2)
+        current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
+        sheet_options = sheets or ([current_sheet] if current_sheet else [])
+        if sheet_options:
+            idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
+            sheet_match = c1.selectbox(
+                "Feuille Excel", sheet_options, index=idx, key=f"sheet_matrix_{pending_id}"
+            )
+        else:
+            sheet_match = c1.text_input(
+                "Feuille Excel", value=current_sheet or "", key=f"sheet_matrix_{pending_id}"
+            )
+        supplier_code = c2.text_input(
+            "Code fournisseur *(obligatoire)*",
+            value=data.get("supplier_code") or supplier_guess or "",
+            key=f"supplier_code_matrix_{pending_id}",
         )
-    else:
-        sheet_match = c1.text_input(
-            "Feuille Excel", value=current_sheet or "", key=f"sheet_matrix_{pending_id}"
+        if not supplier_code.strip():
+            st.warning(
+                "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés."
+            )
+
+        c3, c4 = st.columns(2)
+        variant_header_row = c3.number_input(
+            "Ligne d'en-tête (variantes + colonnes produit)", min_value=1, step=1,
+            value=int(va.get("header_row") or (data.get("header_detection") or {}).get("row") or 1),
+            key=f"va_hr_simple_{pending_id}",
+            help="La ligne où sont écrits les noms de variantes (ALU, BLANC…), juste au-dessus des produits.",
         )
-    supplier_code = c2.text_input(
-        "Code fournisseur *(obligatoire)*",
-        value=data.get("supplier_code") or supplier_guess or "",
-        key=f"supplier_code_matrix_{pending_id}",
-    )
-    if not supplier_code.strip():
-        st.warning(
-            "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés."
+        tier_header_row = c4.number_input(
+            "Ligne d'en-tête des paliers", min_value=1, step=1,
+            value=int(ta.get("header_row") or max(1, int(variant_header_row) - 1)),
+            key=f"ta_hr_simple_{pending_id}",
+            help="La ligne juste au-dessus, avec les paliers de quantité (souvent fusionnée sur plusieurs colonnes).",
         )
 
-    c3, c4 = st.columns(2)
-    variant_header_row = c3.number_input(
-        "Ligne d'en-tête (variantes + colonnes produit)", min_value=1, step=1,
-        value=int(va.get("header_row") or (data.get("header_detection") or {}).get("row") or 1),
-        key=f"va_hr_simple_{pending_id}",
-        help="La ligne où sont écrits les noms de variantes (ALU, BLANC…), juste au-dessus des produits.",
-    )
-    tier_header_row = c4.number_input(
-        "Ligne d'en-tête des paliers", min_value=1, step=1,
-        value=int(ta.get("header_row") or max(1, int(variant_header_row) - 1)),
-        key=f"ta_hr_simple_{pending_id}",
-        help="La ligne juste au-dessus, avec les paliers de quantité (souvent fusionnée sur plusieurs colonnes).",
-    )
-
-    _existing_rows = (dz.get("rows") or "").split(":")
-    _existing_row_start = (
-        int(_existing_rows[0]) if len(_existing_rows) == 2 and _existing_rows[0].strip().isdigit() else None
-    )
-    _existing_row_end = (
-        int(_existing_rows[1]) if len(_existing_rows) == 2 and _existing_rows[1].strip().isdigit() else None
-    )
-    c5, c6 = st.columns(2)
-    data_starts_row = c5.number_input(
-        "Première ligne de produits", min_value=2, step=1,
-        value=int(data.get("data_starts_row") or _existing_row_start or (int(variant_header_row) + 1)),
-        key=f"dsr_matrix_simple_{pending_id}",
-    )
-    data_ends_row = c6.number_input(
-        "Dernière ligne de produits", min_value=int(data_starts_row), step=1,
-        value=max(int(data_starts_row), int(_existing_row_end or (int(data_starts_row) + 20))),
-        key=f"der_matrix_simple_{pending_id}",
-        help="Dernière ligne du tableau (avant totaux/mentions légales éventuels).",
-    )
+        _existing_rows = (dz.get("rows") or "").split(":")
+        _existing_row_start = (
+            int(_existing_rows[0]) if len(_existing_rows) == 2 and _existing_rows[0].strip().isdigit() else None
+        )
+        _existing_row_end = (
+            int(_existing_rows[1]) if len(_existing_rows) == 2 and _existing_rows[1].strip().isdigit() else None
+        )
+        c5, c6 = st.columns(2)
+        data_starts_row = c5.number_input(
+            "Première ligne de produits", min_value=2, step=1,
+            value=int(data.get("data_starts_row") or _existing_row_start or (int(variant_header_row) + 1)),
+            key=f"dsr_matrix_simple_{pending_id}",
+        )
+        data_ends_row = c6.number_input(
+            "Dernière ligne de produits", min_value=int(data_starts_row), step=1,
+            value=max(int(data_starts_row), int(_existing_row_end or (int(data_starts_row) + 20))),
+            key=f"der_matrix_simple_{pending_id}",
+            help="Dernière ligne du tableau (avant totaux/mentions légales éventuels).",
+        )
 
     detected_columns = parse_detected_columns(preview_text, int(variant_header_row))
     tier_ref_columns = parse_detected_columns(preview_text, int(tier_header_row))
     tier_ref_by_letter = dict(tier_ref_columns)
 
-    st.divider()
     st.markdown("##### 🧾 Colonnes produit")
 
     _, designation_col, _ = _source_field(
@@ -1688,14 +1683,13 @@ def render_matrix_form_simple(
         detected_columns, siren_current[0], siren_current[1],
     )
 
-    st.markdown("**Minimum Quantity**")
-    st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
-    min_qty = st.number_input(
-        "Quantité minimum", min_value=1, step=1,
-        value=int(defaults.get("minimum_quantity") or 1),
-        key=f"min_qty_matrix_{pending_id}", label_visibility="collapsed",
-    )
-    st.divider()
+    with st.expander("Minimum Quantity", expanded=True):
+        st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
+        min_qty = st.number_input(
+            "Quantité minimum", min_value=1, step=1,
+            value=int(defaults.get("minimum_quantity") or 1),
+            key=f"min_qty_matrix_{pending_id}", label_visibility="collapsed",
+        )
 
     with st.expander("🏷️ Code article généré (obligatoire)", expanded=True):
         attr_keys = [a.get("key") for a in (attr_out or []) if a.get("key")]
@@ -2054,59 +2048,58 @@ def render_multi_table_form_simple(
     defaults = gery_export.get("defaults") or {}
     existing_tables = data.get("tables") or []
 
-    st.markdown("##### 📍 Informations générales")
-    c1, c2 = st.columns(2)
-    current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
-    sheet_options = sheets or ([current_sheet] if current_sheet else [])
-    if sheet_options:
-        idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
-        sheet_match = c1.selectbox(
-            "Feuille Excel", sheet_options, index=idx, key=f"sheet_mt_{pending_id}"
+    with st.expander("📍 Informations générales", expanded=True):
+        c1, c2 = st.columns(2)
+        current_sheet = data.get("sheet_match") if isinstance(data.get("sheet_match"), str) else None
+        sheet_options = sheets or ([current_sheet] if current_sheet else [])
+        if sheet_options:
+            idx = sheet_options.index(current_sheet) if current_sheet in sheet_options else 0
+            sheet_match = c1.selectbox(
+                "Feuille Excel", sheet_options, index=idx, key=f"sheet_mt_{pending_id}"
+            )
+        else:
+            sheet_match = c1.text_input(
+                "Feuille Excel", value=current_sheet or "", key=f"sheet_mt_{pending_id}"
+            )
+        supplier_code = c2.text_input(
+            "Code fournisseur *(obligatoire)*",
+            value=data.get("supplier_code") or supplier_guess or "",
+            key=f"supplier_code_mt_{pending_id}",
         )
-    else:
-        sheet_match = c1.text_input(
-            "Feuille Excel", value=current_sheet or "", key=f"sheet_mt_{pending_id}"
-        )
-    supplier_code = c2.text_input(
-        "Code fournisseur *(obligatoire)*",
-        value=data.get("supplier_code") or supplier_guess or "",
-        key=f"supplier_code_mt_{pending_id}",
-    )
-    if not supplier_code.strip():
-        st.warning(
-            "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés."
+        if not supplier_code.strip():
+            st.warning(
+                "⚠️ Code fournisseur vide — les exports ne seront pas correctement nommés/rangés."
+            )
+
+        st.markdown("**Prix — réglages communs à tous les tableaux**")
+        c3, c4, c5 = st.columns(3)
+        price_type = c3.text_input(
+            "Type de prix (ex: forfait)", value=(gery_export.get("price_export_mapping") or {}).get(
+                "direct_unit_cost", "forfait"
+            ),
+            key=f"price_type_mt_{pending_id}",
         )
 
-    st.markdown("**Prix — réglages communs à tous les tableaux**")
-    c3, c4, c5 = st.columns(3)
-    price_type = c3.text_input(
-        "Type de prix (ex: forfait)", value=(gery_export.get("price_export_mapping") or {}).get(
-            "direct_unit_cost", "forfait"
-        ),
-        key=f"price_type_mt_{pending_id}",
-    )
+        def _decimal_format_picker(container):
+            options = {
+                "Virgule française (1234,56)": "parse_decimal_fr",
+                "Point US (1234.56)": "parse_decimal_us",
+            }
+            labels = list(options)
+            current_fmt = (
+                (existing_tables[0].get("prices") or [{}])[0].get("transform")
+                if existing_tables else None
+            ) or "parse_decimal_fr"
+            default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
+            chosen = container.selectbox(
+                "Format du nombre", labels, index=labels.index(default_label),
+                key=f"decimalfmt_mt_{pending_id}",
+            )
+            return options[chosen]
 
-    def _decimal_format_picker(container):
-        options = {
-            "Virgule française (1234,56)": "parse_decimal_fr",
-            "Point US (1234.56)": "parse_decimal_us",
-        }
-        labels = list(options)
-        current_fmt = (
-            (existing_tables[0].get("prices") or [{}])[0].get("transform")
-            if existing_tables else None
-        ) or "parse_decimal_fr"
-        default_label = next((lbl for lbl, v in options.items() if v == current_fmt), labels[0])
-        chosen = container.selectbox(
-            "Format du nombre", labels, index=labels.index(default_label),
-            key=f"decimalfmt_mt_{pending_id}",
-        )
-        return options[chosen]
+        decimal_fmt = _decimal_format_picker(c4)
+        currency = c5.text_input("Devise", value="EUR", key=f"currency_mt_{pending_id}")
 
-    decimal_fmt = _decimal_format_picker(c4)
-    currency = c5.text_input("Devise", value="EUR", key=f"currency_mt_{pending_id}")
-
-    st.divider()
     st.markdown("##### 🧾 Tableaux")
     nb_tables = st.number_input(
         "Nombre de tableaux dans le fichier", min_value=1, step=1,
@@ -2264,29 +2257,29 @@ def render_multi_table_form_simple(
                 t.get("attributes"), f"mt_attrs_{pending_id}_{i}", table_columns
             )
 
-            with st.expander("🏷️ Modèle du produit (désignation + code article)", expanded=True):
-                st.caption(
-                    f"Variable réelle disponible : `{{{dimension_key or 'dimension'}}}` "
-                    f"(valeur de la dimension). Toute AUTRE variable (ex: `{{{row_var_name}}}`) "
-                    "prend automatiquement la valeur de la colonne indicatrice de ligne — "
-                    "le nom entre accolades est libre, seule la position compte."
-                )
-                default_desig = tpl.get("designation_template") or (
-                    f"{{{row_var_name}}} — {{{dimension_key or 'dimension'}}}"
-                    if layout == "matrix_2D" else f"{{{row_var_name}}}"
-                )
-                designation_template = st.text_input(
-                    "Modèle de désignation", value=default_desig,
-                    key=f"mt_desigtpl_{pending_id}_{i}",
-                )
-                default_code = tpl.get("supplier_product_code_template") or (
-                    f"{_snake(supplier_code).upper()}-{{{row_var_name}_slug}}-{{{dimension_key or 'dimension'}_slug}}"
-                    if layout == "matrix_2D" else f"{_snake(supplier_code).upper()}-{{{row_var_name}_slug}}"
-                )
-                code_template = st.text_input(
-                    "Modèle de code article", value=default_code,
-                    key=f"mt_codetpl_{pending_id}_{i}",
-                )
+            st.markdown("**🏷️ Modèle du produit (désignation + code article)**")
+            st.caption(
+                f"Variable réelle disponible : `{{{dimension_key or 'dimension'}}}` "
+                f"(valeur de la dimension). Toute AUTRE variable (ex: `{{{row_var_name}}}`) "
+                "prend automatiquement la valeur de la colonne indicatrice de ligne — "
+                "le nom entre accolades est libre, seule la position compte."
+            )
+            default_desig = tpl.get("designation_template") or (
+                f"{{{row_var_name}}} — {{{dimension_key or 'dimension'}}}"
+                if layout == "matrix_2D" else f"{{{row_var_name}}}"
+            )
+            designation_template = st.text_input(
+                "Modèle de désignation", value=default_desig,
+                key=f"mt_desigtpl_{pending_id}_{i}",
+            )
+            default_code = tpl.get("supplier_product_code_template") or (
+                f"{_snake(supplier_code).upper()}-{{{row_var_name}_slug}}-{{{dimension_key or 'dimension'}_slug}}"
+                if layout == "matrix_2D" else f"{_snake(supplier_code).upper()}-{{{row_var_name}_slug}}"
+            )
+            code_template = st.text_input(
+                "Modèle de code article", value=default_code,
+                key=f"mt_codetpl_{pending_id}_{i}",
+            )
 
         tbl: dict[str, Any] = {
             "name": name.strip() or f"tableau_{i + 1}",
@@ -2325,56 +2318,55 @@ def render_multi_table_form_simple(
             tbl["attributes"] = attrs_out
         new_tables.append(tbl)
 
-    st.divider()
-    st.markdown("##### 📅 Validité, code générique, SIREN")
-    c6, c7 = st.columns(2)
-    vs_cell = c6.text_input(
-        "Cellule début de validité (optionnel)",
-        value=(file_metadata.get("validity_start") or {}).get("cell", "") or "",
-        key=f"mt_vs_cell_{pending_id}",
-    )
-    ve_cell = c7.text_input(
-        "Cellule fin de validité (optionnel)",
-        value=(file_metadata.get("validity_end") or {}).get("cell", "") or "",
-        key=f"mt_ve_cell_{pending_id}",
-    )
-    date_options = {"JJ/MM/AAAA": "parse_date_fr", "AAAA-MM-JJ": "parse_date_iso"}
-    date_labels = list(date_options)
-    _current_date_fmt = (
-        (file_metadata.get("validity_start") or {}).get("transform")
-        or (file_metadata.get("validity_end") or {}).get("transform")
-        or "parse_date_fr"
-    )
-    date_default_label = next((lbl for lbl, v in date_options.items() if v == _current_date_fmt), date_labels[0])
-    date_fmt = date_options[st.selectbox(
-        "Format de date", date_labels, index=date_labels.index(date_default_label),
-        key=f"mt_datefmt_{pending_id}",
-    )]
-    st.caption(
-        "Pour une date unique combinée (ex: « Validité du 01/01 au 31/12 »), utilise "
-        "l'onglet « Formulaire avancé » ou « YAML » (regex `validity_period`)."
-    )
+    with st.expander("📅 Validité, code générique, SIREN, unité, quantité minimum", expanded=True):
+        c6, c7 = st.columns(2)
+        vs_cell = c6.text_input(
+            "Cellule début de validité (optionnel)",
+            value=(file_metadata.get("validity_start") or {}).get("cell", "") or "",
+            key=f"mt_vs_cell_{pending_id}",
+        )
+        ve_cell = c7.text_input(
+            "Cellule fin de validité (optionnel)",
+            value=(file_metadata.get("validity_end") or {}).get("cell", "") or "",
+            key=f"mt_ve_cell_{pending_id}",
+        )
+        date_options = {"JJ/MM/AAAA": "parse_date_fr", "AAAA-MM-JJ": "parse_date_iso"}
+        date_labels = list(date_options)
+        _current_date_fmt = (
+            (file_metadata.get("validity_start") or {}).get("transform")
+            or (file_metadata.get("validity_end") or {}).get("transform")
+            or "parse_date_fr"
+        )
+        date_default_label = next((lbl for lbl, v in date_options.items() if v == _current_date_fmt), date_labels[0])
+        date_fmt = date_options[st.selectbox(
+            "Format de date", date_labels, index=date_labels.index(date_default_label),
+            key=f"mt_datefmt_{pending_id}",
+        )]
+        st.caption(
+            "Pour une date unique combinée (ex: « Validité du 01/01 au 31/12 »), utilise "
+            "l'onglet « Formulaire avancé » ou « YAML » (regex `validity_period`)."
+        )
 
-    generic_cell = st.text_input(
-        "Cellule du code article générique Ramery (optionnel)",
-        value=(file_metadata.get("ramery_generic_code") or {}).get("cell", "") or "",
-        key=f"mt_generic_cell_{pending_id}",
-    )
-    siren_cell = st.text_input(
-        "Cellule SIREN fournisseur (optionnel)",
-        value=(file_metadata.get("siren_fournisseur") or {}).get("cell", "") or "",
-        key=f"mt_siren_cell_{pending_id}",
-    )
+        generic_cell = st.text_input(
+            "Cellule du code article générique Ramery (optionnel)",
+            value=(file_metadata.get("ramery_generic_code") or {}).get("cell", "") or "",
+            key=f"mt_generic_cell_{pending_id}",
+        )
+        siren_cell = st.text_input(
+            "Cellule SIREN fournisseur (optionnel)",
+            value=(file_metadata.get("siren_fournisseur") or {}).get("cell", "") or "",
+            key=f"mt_siren_cell_{pending_id}",
+        )
 
-    c8, c9 = st.columns(2)
-    unit_of_measure = c8.text_input(
-        "Unité (ex: FORFAIT, U…)", value=defaults.get("unit_of_measure") or "FORFAIT",
-        key=f"mt_unit_{pending_id}",
-    )
-    min_qty = c9.number_input(
-        "Quantité minimum", min_value=1, step=1,
-        value=int(defaults.get("minimum_quantity") or 1), key=f"mt_minqty_{pending_id}",
-    )
+        c8, c9 = st.columns(2)
+        unit_of_measure = c8.text_input(
+            "Unité (ex: FORFAIT, U…)", value=defaults.get("unit_of_measure") or "FORFAIT",
+            key=f"mt_unit_{pending_id}",
+        )
+        min_qty = c9.number_input(
+            "Quantité minimum", min_value=1, step=1,
+            value=int(defaults.get("minimum_quantity") or 1), key=f"mt_minqty_{pending_id}",
+        )
 
     # ── Reconstruction du mapping ────────────────────────────────────────────
     new_file_metadata: dict[str, Any] = {}
