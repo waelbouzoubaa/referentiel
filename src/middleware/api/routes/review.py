@@ -61,7 +61,6 @@ def list_pending() -> list[dict]:
                 "status": data["status"],
                 "created_at": data["created_at"],
                 "confidence": data.get("confidence"),
-                "escalated": data.get("escalated", False),
             })
         except Exception:
             continue
@@ -88,7 +87,7 @@ def update_pending_yaml(pending_id: str, request: UpdateYamlRequest) -> UpdateYa
     """Valide et enregistre une édition du YAML proposé (avant approbation)."""
     meta = _load_pending(pending_id)
 
-    if meta["status"] != "pending":
+    if meta["status"] not in ("pending", "needs_support"):
         raise HTTPException(
             status_code=409,
             detail=f"Cette demande a déjà été {meta['status']}.",
@@ -115,18 +114,31 @@ class EscalateRequest(BaseModel):
 
 @router.post("/review/{pending_id}/escalate", tags=["validation"])
 def escalate_pending(pending_id: str, request: EscalateRequest) -> dict:
-    """Marque (ou démarque) une demande comme nécessitant l'aide du support (dev).
+    """Bascule une demande vers/depuis la file « Aide support » (statut needs_support).
 
-    Signalement orthogonal au statut d'approbation — n'empêche pas de valider ou
-    rejeter, sert juste à repérer les cas où le métier a besoin d'aide.
+    Une demande needs_support reste éditable et validable exactement comme une
+    demande pending (voir les gardes de statut ci-dessous) — c'est juste une file
+    de triage séparée pour que l'équipe dev retrouve facilement les cas compliqués
+    signalés par le métier.
     """
     meta = _load_pending(pending_id)
-    meta["escalated"] = request.escalated
+    if request.escalated:
+        if meta["status"] not in ("pending", "needs_support"):
+            raise HTTPException(
+                status_code=409, detail=f"Cette demande a déjà été {meta['status']}."
+            )
+        meta["status"] = "needs_support"
+    else:
+        if meta["status"] != "needs_support":
+            raise HTTPException(
+                status_code=409, detail="Cette demande n'est pas dans la file support."
+            )
+        meta["status"] = "pending"
     (PENDING_DIR / f"{pending_id}.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    logger.info("statut d'escalade modifié", pending_id=pending_id, escalated=request.escalated)
-    return {"ok": True, "escalated": request.escalated}
+    logger.info("statut d'escalade modifié", pending_id=pending_id, status=meta["status"])
+    return {"ok": True, "status": meta["status"]}
 
 
 @router.get("/review/{pending_id}/preview", tags=["validation"])
@@ -239,7 +251,7 @@ def generate_yaml_for_pending(pending_id: str) -> dict:
     YAML déjà connu ici.
     """
     meta = _load_pending(pending_id)
-    if meta["status"] != "pending":
+    if meta["status"] not in ("pending", "needs_support"):
         raise HTTPException(status_code=409, detail=f"Cette demande a déjà été {meta['status']}.")
 
     file_path = Path(meta.get("file_path", ""))
@@ -309,7 +321,7 @@ async def approve_pending(
     """Approuve le YAML, le sauvegarde, puis traite le fichier (DB + MinIO + export CSV)."""
     meta = _load_pending(pending_id)
 
-    if meta["status"] != "pending":
+    if meta["status"] not in ("pending", "needs_support"):
         return _html_page(
             "Déjà traité",
             f"Cette demande a déjà été {meta['status']}.",

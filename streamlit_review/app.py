@@ -83,6 +83,7 @@ st.markdown(
     .badge-ok   { color: #00695C; background: #E6F4F1; border-color: #009883; }
     .badge-wait { color: #003D7C; background: #EAF1F8; border-color: #003D7C; }
     .badge-ko   { color: #A30F12; background: #FDEAEA; border-color: #D41317; }
+    .badge-support { color: #8A5A00; background: #FFF3E0; border-color: #F39C12; }
 
     hr { border-color: #E3E8EE; }
     </style>
@@ -126,6 +127,7 @@ def status_badge(status: str) -> str:
     mapping = {
         "approved": ("badge-ok", "validé"),
         "pending": ("badge-wait", "en attente"),
+        "needs_support": ("badge-support", "aide support"),
         "rejected": ("badge-ko", "rejeté"),
     }
     cls, label = mapping.get(status, ("badge-wait", status))
@@ -2617,18 +2619,18 @@ except Exception as exc:
     st.stop()
 
 # Chaque statut a sa propre liste (pas de mélange). Compteurs pour s'y retrouver.
-counts = {"pending": 0, "approved": 0, "rejected": 0}
+counts = {"pending": 0, "approved": 0, "needs_support": 0}
 for it in pending_items:
     counts[it["status"]] = counts.get(it["status"], 0) + 1
 
 statut_labels = {
     "pending": f"En attente ({counts['pending']})",
     "approved": f"Validés ({counts['approved']})",
-    "rejected": f"Rejetés ({counts['rejected']})",
+    "needs_support": f"🆘 Aide support ({counts['needs_support']})",
 }
 statut = st.sidebar.radio(
     "Statut",
-    options=["pending", "approved", "rejected"],
+    options=["pending", "approved", "needs_support"],
     format_func=lambda s: statut_labels[s],
     key="statut_filter",
 )
@@ -2636,15 +2638,14 @@ statut = st.sidebar.radio(
 filtered = [item for item in pending_items if item["status"] == statut]
 
 if not filtered:
-    libelle = {"pending": "en attente", "approved": "validée", "rejected": "rejetée"}[statut]
+    libelle = {"pending": "en attente", "approved": "validée", "needs_support": "en aide support"}[statut]
     st.info(f"Aucune demande {libelle} pour le moment.")
     st.stop()
 
 selected_idx = st.sidebar.radio(
     "Demandes",
     options=range(len(filtered)),
-    format_func=lambda i: "{}{}\n{}".format(
-        "🆘 " if filtered[i].get("escalated") else "",
+    format_func=lambda i: "{}\n{}".format(
         filtered[i]["supplier_guess"].replace("_", " ").title(),
         filtered[i]["filename"][:32] + "…" if len(filtered[i]["filename"]) > 32 else filtered[i]["filename"],
     ),
@@ -2665,29 +2666,9 @@ c3.markdown(
 )
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 
-# ── Stepper de la pipeline ───────────────────────────────────────────────────
 _yaml_mode = load_yaml(meta.get("yaml_proposed") or "").get("extraction_mode")
 _confidence_val = meta.get("confidence")
-_step1_done = bool((meta.get("yaml_proposed") or "").strip())
-_step3_done = meta["status"] == "approved"
-
-
-def _step_html(label: str, done: bool, current: bool) -> str:
-    icon = "✅" if done else ("🔵" if current else "⚪")
-    style = "font-weight:600;" if current else "color:#999;"
-    return f'<span style="{style}">{icon} {label}</span>'
-
-
-st.markdown(
-    "&nbsp;➜&nbsp;".join([
-        _step_html("① Suggestion IA", _step1_done, not _step1_done),
-        _step_html("② Validation métier", _step3_done, _step1_done and not _step3_done),
-        _step_html("③ Export généré", _step3_done, False),
-    ]),
-    unsafe_allow_html=True,
-)
-
-_gauge_col, _diff_col, _esc_col = st.columns([2, 1, 3])
+_gauge_col, _diff_col = st.columns([3, 1])
 with _gauge_col:
     if _confidence_val is not None:
         st.caption(f"💡 Confiance de la suggestion : {_confidence_val}%")
@@ -2698,14 +2679,6 @@ with _diff_col:
             _confidence_val is not None and _confidence_val < 70
         )
         st.caption("🟠 Compliqué" if _is_complicated else "🟢 Simple")
-with _esc_col:
-    _escalated = bool(meta.get("escalated"))
-    _esc_label = "✅ Retirer de la file support" if _escalated else "🆘 Demander l'aide du support"
-    if st.button(_esc_label, key=f"escalate_btn_{pending_id}"):
-        api_post(f"/api/v1/review/{pending_id}/escalate", {"escalated": not _escalated})
-        st.rerun()
-    if _escalated:
-        st.caption("🆘 Cette demande est signalée au support.")
 
 sheets_key = f"sheets_list_{pending_id}"
 if sheets_key not in st.session_state:
@@ -3036,7 +3009,7 @@ with tab_ai:
 
 st.divider()
 
-disabled = meta["status"] != "pending"
+disabled = meta["status"] not in ("pending", "needs_support")
 action_col1, action_col2 = st.columns(2)
 
 if action_col1.button(
@@ -3049,10 +3022,16 @@ if action_col1.button(
     st.session_state["last_action_html"] = resp.text
     st.rerun()
 
-if action_col2.button("❌ Rejeter", disabled=disabled, key=f"reject_{pending_id}"):
-    resp = api_get(f"/api/v1/review/{pending_id}/reject")
-    st.session_state["last_action_html"] = resp.text
-    st.rerun()
+if meta["status"] == "needs_support":
+    if action_col2.button("↩️ Remettre en attente métier", key=f"unescalate_{pending_id}"):
+        api_post(f"/api/v1/review/{pending_id}/escalate", {"escalated": False})
+        st.rerun()
+else:
+    if action_col2.button(
+        "🆘 Demander l'aide du support", disabled=disabled, key=f"escalate_{pending_id}"
+    ):
+        api_post(f"/api/v1/review/{pending_id}/escalate", {"escalated": True})
+        st.rerun()
 
 # Téléchargement des fichiers Gery générés (après validation)
 exports = meta.get("exports") or []
