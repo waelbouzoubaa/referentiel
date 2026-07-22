@@ -2,8 +2,6 @@ supplier_code: "atlantic_scga_chauffage"
 mapping_version: 1
 description: "Atlantic SCGA — gamme chauffage électrique et sèche-serviettes"
 upload_mode: "full"
-sharepoint_folder: "atlantic"
-filename_keywords: ["Chauffage", "chauffage"]
 
 sheet_match: "Atlantic 2026"
 header_detection:
