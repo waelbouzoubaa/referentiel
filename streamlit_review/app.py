@@ -63,7 +63,12 @@ st.markdown(
     }
     [data-testid="stSidebar"] * { color: #FFFFFF !important; }
     [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.22); }
-    /* Radios de la sidebar : masque le rond natif, sélection = pastille pleine moderne */
+    /* Radios de la sidebar : masque le rond natif (classe relevée en inspectant
+       l'élément réellement rendu — st-emotion-cache-* généré par Streamlit/BaseWeb,
+       peut changer si Streamlit est mis à jour), sélection = pastille moderne */
+    [data-testid="stSidebar"] .st-emotion-cache-1fuixhc {
+        display: none !important;
+    }
     [data-testid="stSidebar"] [data-baseweb="radio"] div:first-of-type,
     [data-testid="stSidebar"] [role="radiogroup"] label > div:first-of-type,
     [data-testid="stSidebar"] [role="radiogroup"] label span:first-of-type {
