@@ -63,14 +63,24 @@ st.markdown(
     }
     [data-testid="stSidebar"] * { color: #FFFFFF !important; }
     [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.22); }
-    [data-testid="stSidebar"] [data-baseweb="radio"] div:first-child {
-        border-color: rgba(255,255,255,.6) !important;
+    /* Radios de la sidebar : masque le rond natif, sélection = pastille pleine moderne */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div:first-child {
+        display: none;
     }
     [data-testid="stSidebar"] .stRadio [role="radiogroup"] label {
-        padding: 6px 10px; border-radius: 8px; transition: background .15s;
+        padding: 8px 12px; border-radius: 8px; margin-bottom: 2px;
+        border-left: 3px solid transparent;
+        transition: background .15s, border-color .15s;
     }
     [data-testid="stSidebar"] .stRadio [role="radiogroup"] label:hover {
         background: rgba(255,255,255,.08);
+    }
+    [data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) {
+        background: rgba(255,255,255,.18);
+        border-left: 3px solid #FFFFFF;
+    }
+    [data-testid="stSidebar"] .stRadio [role="radiogroup"] label:has(input:checked) p {
+        font-weight: 700 !important;
     }
 
     /* En-tête de marque en haut de la sidebar : logo rond + nom */
