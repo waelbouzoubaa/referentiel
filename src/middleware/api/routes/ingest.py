@@ -68,9 +68,11 @@ def _inject_sharepoint_folder(yaml_content: str, folder_name: str) -> str:
 def _find_pending_for_file(
     folder_name: str, filename: str, sharepoint_item_id: str | None = None
 ) -> dict | None:
-    """Retourne une demande déjà 'pending' pour ce fichier, sinon None.
+    """Retourne une demande déjà ouverte (pending ou needs_support) pour ce fichier.
 
-    Priorité à l'item ID SharePoint (clé stable), fallback sur (dossier, nom).
+    Priorité à l'item ID SharePoint (clé stable), fallback sur (dossier, nom). Les
+    demandes déjà approved/rejected ne comptent pas — une nouvelle version du même
+    fichier doit repartir sur une demande fraîche.
     """
     if not PENDING_DIR.exists():
         return None
@@ -79,7 +81,7 @@ def _find_pending_for_file(
             data = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if data.get("status") != "pending":
+        if data.get("status") not in ("pending", "needs_support"):
             continue
         if sharepoint_item_id and data.get("sharepoint_item_id") == sharepoint_item_id:
             return data

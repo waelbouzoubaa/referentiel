@@ -105,6 +105,28 @@ async def generate_gery_exports_endpoint(
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
 
+    from middleware.api.routes.ingest import _find_pending_for_file
+
+    existing = _find_pending_for_file(
+        request.folder_name or request.supplier_code,
+        request.original_filename or path.name,
+        request.sharepoint_item_id,
+    )
+    if existing is not None:
+        path.unlink(missing_ok=True)
+        logger.info(
+            "doublon évité — demande déjà en attente",
+            pending_id=existing["id"],
+            fichier=path.name,
+        )
+        return GenerateExportsResponse(
+            supplier_code=request.supplier_code,
+            files=[],
+            generated_at=datetime.utcnow(),
+            pending_id=existing["id"],
+            pending_issues=existing.get("anomaly_issues") or [],
+        )
+
     rule = _load_rule(request.supplier_code)
 
     parse_result = _parse_with_rule(path, rule)
