@@ -1,6 +1,6 @@
 # Déploiement sur une nouvelle VM
 
-Guide pour déployer la stack middleware-ramery (API, watcher SharePoint, PostgreSQL, MinIO, n8n) sur une VM neuve (Ubuntu/Debian).
+Guide pour déployer la stack middleware-ramery (API, watcher SharePoint, PostgreSQL, MinIO) sur une VM neuve (Ubuntu/Debian).
 
 ## 1. Prérequis sur la VM
 
@@ -58,10 +58,9 @@ Services démarrés :
 | Validation mappings IA (Streamlit) | `http://<vm>:8503` | — |
 | MinIO Console | `http://<vm>:9011` | `minioadmin` / `minioadmin` |
 | MinIO API S3 | `http://<vm>:9010` | `minioadmin` / `minioadmin` |
-| n8n | `http://<vm>:5679` | `admin` / `changeme` (via `N8N_BASIC_AUTH_*`) |
 | PostgreSQL | `<vm>:5432` | `middleware` / `middleware` |
 
-> ⚠️ Pour une VM accessible publiquement, changer les mots de passe par défaut (Postgres, MinIO, n8n) dans `docker-compose.yml` / `.env`, et restreindre les ports exposés via le pare-feu (seul `8000` et éventuellement `9011`/`5679` doivent être accessibles depuis l'extérieur si besoin).
+> ⚠️ Pour une VM accessible publiquement, changer les mots de passe par défaut (Postgres, MinIO) dans `docker-compose.yml` / `.env`, et restreindre les ports exposés via le pare-feu (seul `8000` et éventuellement `9011` doivent être accessibles depuis l'extérieur si besoin).
 
 ## 5. Migrations base de données
 

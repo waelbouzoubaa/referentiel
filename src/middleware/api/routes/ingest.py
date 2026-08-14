@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import unicodedata
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
@@ -19,8 +17,6 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 PENDING_DIR = Path("/app/uploads/pending")
-N8N_WEBHOOK_URL = os.environ.get("N8N_WEBHOOK_URL", "http://n8n:5679/webhook/pending-config")
-API_BASE_URL = os.environ.get("MIDDLEWARE_API_URL", "http://localhost:8000")
 
 
 class UnknownIngestRequest(BaseModel):
@@ -222,24 +218,6 @@ async def ingest_unknown(
         _generate_ai_suggestion_background,
         pending_id, file_path, request.folder_name, request.filename,
     )
-
-    # Notifier n8n
-    try:
-        httpx.post(
-            N8N_WEBHOOK_URL,
-            json={
-                "pending_id": pending_id,
-                "filename": request.filename,
-                "folder_name": request.folder_name,
-                "supplier_guess": supplier_guess,
-                "approve_url": f"{API_BASE_URL}/api/v1/review/{pending_id}/approve",
-                "reject_url": f"{API_BASE_URL}/api/v1/review/{pending_id}/reject",
-            },
-            timeout=10,
-        )
-        logger.info("n8n notifié", pending_id=pending_id)
-    except Exception as exc:
-        logger.warning("notification n8n échouée", erreur=str(exc))
 
     return UnknownIngestResponse(
         pending_id=pending_id,

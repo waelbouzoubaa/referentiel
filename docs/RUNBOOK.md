@@ -38,7 +38,7 @@ docker compose ps          # tous les conteneurs "Up" ; api "healthy"
 curl http://localhost:8000/health     # -> {"status":"ok","version":"0.1.0"}
 ```
 Conteneurs attendus : `middleware-api`, `middleware-review-ui`, `middleware-watcher`,
-`middleware-postgres`, `middleware-minio`, `middleware-n8n`.
+`middleware-postgres`, `middleware-minio`.
 
 Si un conteneur est arrêté : `docker compose up -d`
 

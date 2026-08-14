@@ -6,9 +6,7 @@ Middleware de normalisation adaptative des catalogues Excel hétérogènes des f
 
 ```
 SharePoint Tempo (fournisseurs)
-    ↓  Microsoft Graph /delta
-n8n self-hosted (orchestration, scheduling 15 min)
-    ↓
+    ↓  Microsoft Graph /delta (watcher Python, polling 30s)
 MinIO / GCS (archivage immuable des fichiers bruts)
     ↓
 Service Python FastAPI (parsing YAML + pivot + delta + export)
@@ -44,7 +42,6 @@ Services démarrés :
 | API FastAPI | http://localhost:8000 |
 | Docs Swagger | http://localhost:8000/docs |
 | MinIO Console | http://localhost:9001 (admin/minioadmin) |
-| n8n | http://localhost:5679 (admin/changeme) |
 | PostgreSQL | localhost:5432 (middleware/middleware) |
 
 ### 3. Vérifier le démarrage
@@ -87,8 +84,7 @@ middleware-ramery/
 │   ├── delta/         # Calcul de delta (Livrable 7)
 │   └── exporter/      # Génération fichiers Gery (Livrable 8)
 ├── config/
-│   ├── suppliers/     # YAML de mapping par fournisseur
-│   └── n8n/           # Workflows n8n exportés en JSON
+│   └── suppliers/     # YAML de mapping par fournisseur
 ├── alembic/           # Migrations base de données
 ├── tests/             # Tests pytest
 ├── data/
@@ -123,5 +119,5 @@ middleware-ramery/
 - [ ] Livrable 6 — Moteur extraction `multi_table` (Agenor)
 - [ ] Livrable 7 — Calcul delta + historique
 - [ ] Livrable 8 — Générateur 3 fichiers Gery
-- [ ] Livrable 9 — API FastAPI + workflow n8n
+- [ ] Livrable 9 — API FastAPI
 - [ ] Livrable 10 — Tests E2E + runbook

@@ -52,34 +52,6 @@ services:
       "
     restart: "no"
 
-  # ── n8n (orchestration) ──────────────────────────────────────────────────────
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: middleware-n8n
-    environment:
-      N8N_BASIC_AUTH_ACTIVE: "true"
-      N8N_BASIC_AUTH_USER: admin
-      N8N_BASIC_AUTH_PASSWORD: changeme
-      N8N_HOST: localhost
-      N8N_PORT: 5679
-      N8N_SECURE_COOKIE: "false"
-      WEBHOOK_URL: http://localhost:5679/
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: middleware
-      DB_POSTGRESDB_USER: middleware
-      DB_POSTGRESDB_PASSWORD: middleware
-      DB_POSTGRESDB_SCHEMA: n8n
-    volumes:
-      - n8n_data:/home/node/.n8n
-      - ./config/n8n:/config/n8n:ro
-    ports:
-      - "5679:5679"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   # ── Service Python FastAPI ───────────────────────────────────────────────────
   api:
     build:
@@ -99,7 +71,6 @@ services:
       MIDDLEWARE_INPUT_FOLDER: /data/input
       MIDDLEWARE_OUTPUT_FOLDER: /data/output
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      N8N_WEBHOOK_URL: http://n8n:5679/webhook/pending-config
       MIDDLEWARE_API_URL: http://localhost:8000
     volumes:
       - ./src:/app/src:ro
@@ -178,7 +149,6 @@ services:
 volumes:
   postgres_data:
   minio_data:
-  n8n_data:
   uploads:
   exports:
   watcher_state:
