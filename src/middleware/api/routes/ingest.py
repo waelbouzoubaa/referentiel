@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from middleware.core.logging import get_logger
@@ -108,14 +108,61 @@ def _find_pending_for_file(
     return None
 
 
-@router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])
-async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
-    """Reçoit un fichier inconnu, l'archive dans MinIO, génère une suggestion IA
-    (YAML + confiance) et crée une demande de validation.
+def _generate_ai_suggestion_background(
+    pending_id: str, file_path: Path, folder_name: str, filename: str
+) -> None:
+    """Tâche de fond : génère la suggestion IA et met à jour le pending JSON.
 
-    La génération IA est best-effort : si Gemini échoue, la demande est quand même
-    créée (YAML vide, comme avant) — l'utilisateur peut relancer avec le bouton
-    « Générer avec l'IA » dans l'interface. Rien ne se perd.
+    Tourne APRÈS que la réponse HTTP soit déjà repartie vers le watcher — l'appel
+    Gemini (jusqu'à 1-2 min) ne bloque donc jamais le reste de l'API (interface,
+    autres requêtes). Best-effort : si ça échoue, la demande reste avec un YAML
+    vide (le bouton « Générer avec l'IA » de l'interface reste disponible).
+    """
+    try:
+        from middleware.ai.yaml_generator import generate_yaml_from_excel
+
+        supplier_guess, yaml_content, prompt, confidence = generate_yaml_from_excel(
+            file_path=file_path, folder_name=folder_name, filename=filename,
+        )
+        yaml_proposed = _inject_sharepoint_folder(yaml_content, folder_name)
+    except Exception as exc:
+        logger.warning(
+            "génération IA automatique échouée (tâche de fond) — demande reste sans suggestion",
+            pending_id=pending_id,
+            filename=filename,
+            erreur=str(exc),
+        )
+        return
+
+    meta_path = PENDING_DIR / f"{pending_id}.json"
+    if not meta_path.exists():
+        return
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if meta.get("status") != "pending":
+        # La demande a déjà été traitée/modifiée entre-temps — ne pas écraser.
+        return
+
+    meta["yaml_proposed"] = yaml_proposed
+    meta["initial_prompt"] = prompt
+    meta["confidence"] = confidence
+    meta["confidence_source"] = "ai_generated"
+    meta["supplier_guess"] = supplier_guess
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info(
+        "suggestion IA (tâche de fond) prête", pending_id=pending_id, confidence=confidence
+    )
+
+
+@router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])
+async def ingest_unknown(
+    request: UnknownIngestRequest, background_tasks: BackgroundTasks
+) -> UnknownIngestResponse:
+    """Reçoit un fichier inconnu, l'archive dans MinIO et crée une demande de
+    validation — la suggestion IA (YAML + confiance) est générée en tâche de fond
+    juste après, sans bloquer la réponse ni le reste de l'API.
     """
     file_path = Path(request.file_path)
     if not file_path.exists():
@@ -143,30 +190,6 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
     content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()[:12]
     minio_path = await upload_raw_file(file_path, supplier_guess, content_hash)
 
-    # Suggestion IA immédiate (best-effort — la demande est créée même si ça échoue)
-    yaml_proposed = ""
-    initial_prompt = ""
-    confidence: int | None = None
-    confidence_source: str | None = None
-    try:
-        from middleware.ai.yaml_generator import generate_yaml_from_excel
-
-        ai_supplier_guess, yaml_content, prompt, confidence = generate_yaml_from_excel(
-            file_path=file_path,
-            folder_name=request.folder_name,
-            filename=request.filename,
-        )
-        yaml_proposed = _inject_sharepoint_folder(yaml_content, request.folder_name)
-        initial_prompt = prompt
-        confidence_source = "ai_generated"
-        supplier_guess = ai_supplier_guess
-    except Exception as exc:
-        logger.warning(
-            "génération IA automatique échouée à l'ingestion — demande créée sans suggestion",
-            filename=request.filename,
-            erreur=str(exc),
-        )
-
     meta = {
         "id": pending_id,
         "created_at": datetime.utcnow().isoformat(),
@@ -174,10 +197,10 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
         "folder_name": request.folder_name,
         "file_path": request.file_path,
         "supplier_guess": supplier_guess,
-        "yaml_proposed": yaml_proposed,
-        "initial_prompt": initial_prompt,
-        "confidence": confidence,
-        "confidence_source": confidence_source,
+        "yaml_proposed": "",
+        "initial_prompt": "",
+        "confidence": None,
+        "confidence_source": None,
         "web_url": request.web_url,
         "sharepoint_item_id": request.sharepoint_item_id,
         "minio_path": minio_path,
@@ -192,6 +215,12 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
         filename=request.filename,
         folder=request.folder_name,
         minio_path=minio_path,
+    )
+
+    # Suggestion IA en tâche de fond — ne bloque ni cette réponse ni le reste de l'API
+    background_tasks.add_task(
+        _generate_ai_suggestion_background,
+        pending_id, file_path, request.folder_name, request.filename,
     )
 
     # Notifier n8n
