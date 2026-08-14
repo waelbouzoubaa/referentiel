@@ -21,6 +21,10 @@ _LOGO_PATH = Path(__file__).parent / "logo.png"
 
 API_URL = os.environ.get("MIDDLEWARE_API_URL", "http://api:8000")
 
+# Mettre à True pour réafficher les onglets « Formulaire avancé » et « Assistant IA »
+# (masqués par défaut — le métier n'utilise que YAML / Formulaire simplifié).
+SHOW_ADVANCED_TABS = False
+
 TRANSFORMS_VALIDES = [
     "strip",
     "strip_upper",
@@ -2835,9 +2839,13 @@ with col_preview:
         st.caption("💡 Rédigez ou générez un YAML pour voir l'aperçu.")
 
 with col_edit:
-    tab_yaml, tab_simple, tab_form, tab_ai = st.tabs(
-        ["YAML", "🧩 Formulaire simplifié", "🛠️ Formulaire avancé", "🤖 Assistant IA"]
-    )
+    _tab_labels = ["YAML", "🧩 Formulaire simplifié"]
+    if SHOW_ADVANCED_TABS:
+        _tab_labels += ["🛠️ Formulaire avancé", "🤖 Assistant IA"]
+    _tabs = st.tabs(_tab_labels)
+    tab_yaml, tab_simple = _tabs[0], _tabs[1]
+    if SHOW_ADVANCED_TABS:
+        tab_form, tab_ai = _tabs[2], _tabs[3]
 
 with tab_yaml:
     # ── Charger un YAML existant du même dossier ──────────────────────────
@@ -3009,78 +3017,79 @@ with tab_simple:
                 else:
                     st.error(f"Erreur d'enregistrement : {_detail}")
 
-with tab_form:
-    current_data = load_yaml(st.session_state[yaml_key])
-    extraction_mode = current_data.get("extraction_mode")
-    detected_columns = parse_detected_columns(
-        preview_text, (current_data.get("header_detection") or {}).get("row")
-    )
-    renderer = FORM_RENDERERS.get(extraction_mode)
-    if renderer is None:
-        st.info(
-            f"Mode d'extraction '{extraction_mode}' non reconnu — éditez via l'onglet YAML."
+if SHOW_ADVANCED_TABS:
+    with tab_form:
+        current_data = load_yaml(st.session_state[yaml_key])
+        extraction_mode = current_data.get("extraction_mode")
+        detected_columns = parse_detected_columns(
+            preview_text, (current_data.get("header_detection") or {}).get("row")
         )
-    else:
-        new_mapping = renderer(current_data, pending_id, detected_columns)
-        if new_mapping is not None:
-            new_yaml_text = dump_yaml(new_mapping)
-            resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": new_yaml_text})
-            if resp.status_code == 200:
-                st.success("Formulaire enregistré et validé.")
-                set_yaml_text(new_yaml_text)
-            elif resp.status_code == 422:
-                st.error("Configuration invalide :")
-                for err in resp.json().get("detail", []):
-                    st.write(f"- {err}")
-            else:
-                st.error(f"Erreur {resp.status_code} : {resp.text}")
-
-with tab_ai:
-    st.caption(
-        "Demande à l'IA de modifier le mapping en langage naturel. Ses changements "
-        "s'appliquent au YAML — donc au formulaire et à l'aperçu."
-    )
-    with st.expander("📩 Prompt initial envoyé à l'IA"):
-        st.code(meta.get("initial_prompt") or "(non disponible)", language=None)
-
-    chat_key = f"chat_{pending_id}"
-    if chat_key not in st.session_state:
-        st.session_state[chat_key] = []
-    for role, content in st.session_state[chat_key]:
-        with st.chat_message(role):
-            st.markdown(content)
-
-    instruction = st.text_input(
-        "Ta demande (ex. « mets les dates en E4/J4 format FR », « le prix est en colonne G »)",
-        key=f"ai_instr_{pending_id}",
-    )
-    if st.button("Envoyer à l'IA", key=f"ai_send_{pending_id}") and instruction.strip():
-        st.session_state[chat_key].append(("user", instruction.strip()))
-        with st.spinner("L'IA met à jour le YAML…"):
-            resp = api_post(
-                f"/api/v1/review/{pending_id}/ai-edit",
-                {"yaml_content": st.session_state[yaml_key], "instruction": instruction.strip()},
+        renderer = FORM_RENDERERS.get(extraction_mode)
+        if renderer is None:
+            st.info(
+                f"Mode d'extraction '{extraction_mode}' non reconnu — éditez via l'onglet YAML."
             )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data["valid"]:
-                st.session_state[chat_key].append((
-                    "assistant",
-                    "✅ YAML mis à jour. Vérifie les onglets **YAML**, **Formulaire** "
-                    "et **Aperçu export Gery**.",
-                ))
-            else:
-                errs = "\n".join(f"- {e}" for e in data["errors"])
-                st.session_state[chat_key].append((
-                    "assistant",
-                    f"⚠️ YAML modifié mais **invalide** :\n{errs}\n\nRedemande-moi une correction.",
-                ))
-            set_yaml_text(data["yaml"])
         else:
-            st.session_state[chat_key].append(
-                ("assistant", f"Erreur {resp.status_code} : {resp.text[:200]}")
-            )
-            st.rerun()
+            new_mapping = renderer(current_data, pending_id, detected_columns)
+            if new_mapping is not None:
+                new_yaml_text = dump_yaml(new_mapping)
+                resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": new_yaml_text})
+                if resp.status_code == 200:
+                    st.success("Formulaire enregistré et validé.")
+                    set_yaml_text(new_yaml_text)
+                elif resp.status_code == 422:
+                    st.error("Configuration invalide :")
+                    for err in resp.json().get("detail", []):
+                        st.write(f"- {err}")
+                else:
+                    st.error(f"Erreur {resp.status_code} : {resp.text}")
+
+    with tab_ai:
+        st.caption(
+            "Demande à l'IA de modifier le mapping en langage naturel. Ses changements "
+            "s'appliquent au YAML — donc au formulaire et à l'aperçu."
+        )
+        with st.expander("📩 Prompt initial envoyé à l'IA"):
+            st.code(meta.get("initial_prompt") or "(non disponible)", language=None)
+
+        chat_key = f"chat_{pending_id}"
+        if chat_key not in st.session_state:
+            st.session_state[chat_key] = []
+        for role, content in st.session_state[chat_key]:
+            with st.chat_message(role):
+                st.markdown(content)
+
+        instruction = st.text_input(
+            "Ta demande (ex. « mets les dates en E4/J4 format FR », « le prix est en colonne G »)",
+            key=f"ai_instr_{pending_id}",
+        )
+        if st.button("Envoyer à l'IA", key=f"ai_send_{pending_id}") and instruction.strip():
+            st.session_state[chat_key].append(("user", instruction.strip()))
+            with st.spinner("L'IA met à jour le YAML…"):
+                resp = api_post(
+                    f"/api/v1/review/{pending_id}/ai-edit",
+                    {"yaml_content": st.session_state[yaml_key], "instruction": instruction.strip()},
+                )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data["valid"]:
+                    st.session_state[chat_key].append((
+                        "assistant",
+                        "✅ YAML mis à jour. Vérifie les onglets **YAML**, **Formulaire** "
+                        "et **Aperçu export Gery**.",
+                    ))
+                else:
+                    errs = "\n".join(f"- {e}" for e in data["errors"])
+                    st.session_state[chat_key].append((
+                        "assistant",
+                        f"⚠️ YAML modifié mais **invalide** :\n{errs}\n\nRedemande-moi une correction.",
+                    ))
+                set_yaml_text(data["yaml"])
+            else:
+                st.session_state[chat_key].append(
+                    ("assistant", f"Erreur {resp.status_code} : {resp.text[:200]}")
+                )
+                st.rerun()
 
 st.divider()
 
