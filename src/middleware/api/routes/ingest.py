@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import unicodedata
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -65,17 +66,31 @@ def _inject_sharepoint_folder(yaml_content: str, folder_name: str) -> str:
     return yaml_content
 
 
+def _norm(text: str) -> str:
+    """Normalise un texte Unicode (forme NFC) avant comparaison.
+
+    SharePoint/Graph renvoie parfois les noms de fichiers en forme décomposée
+    (ex: "é" = "e" + accent combinant séparé) plutôt que composée — visuellement
+    identique mais PAS égal en comparaison stricte, ce qui faisait rater la
+    détection de doublon pour tout fichier avec un caractère accentué.
+    """
+    return unicodedata.normalize("NFC", text or "")
+
+
 def _find_pending_for_file(
     folder_name: str, filename: str, sharepoint_item_id: str | None = None
 ) -> dict | None:
     """Retourne une demande déjà ouverte (pending ou needs_support) pour ce fichier.
 
-    Priorité à l'item ID SharePoint (clé stable), fallback sur (dossier, nom). Les
-    demandes déjà approved/rejected ne comptent pas — une nouvelle version du même
-    fichier doit repartir sur une demande fraîche.
+    Priorité à l'item ID SharePoint (clé stable), fallback sur (dossier, nom),
+    comparés après normalisation Unicode (voir _norm). Les demandes déjà
+    approved/rejected ne comptent pas — une nouvelle version du même fichier doit
+    repartir sur une demande fraîche.
     """
     if not PENDING_DIR.exists():
         return None
+    folder_name = _norm(folder_name)
+    filename = _norm(filename)
     for meta_path in PENDING_DIR.glob("*.json"):
         try:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -86,8 +101,8 @@ def _find_pending_for_file(
         if sharepoint_item_id and data.get("sharepoint_item_id") == sharepoint_item_id:
             return data
         if (
-            data.get("folder_name") == folder_name
-            and data.get("filename") == filename
+            _norm(data.get("folder_name", "")) == folder_name
+            and _norm(data.get("filename", "")) == filename
         ):
             return data
     return None
