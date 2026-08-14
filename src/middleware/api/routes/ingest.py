@@ -95,7 +95,13 @@ def _find_pending_for_file(
 
 @router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])
 async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse:
-    """Reçoit un fichier inconnu, l'archive dans MinIO et crée une demande de validation (sans IA)."""
+    """Reçoit un fichier inconnu, l'archive dans MinIO, génère une suggestion IA
+    (YAML + confiance) et crée une demande de validation.
+
+    La génération IA est best-effort : si Gemini échoue, la demande est quand même
+    créée (YAML vide, comme avant) — l'utilisateur peut relancer avec le bouton
+    « Générer avec l'IA » dans l'interface. Rien ne se perd.
+    """
     file_path = Path(request.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Fichier introuvable : {request.file_path}")
@@ -122,6 +128,30 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
     content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()[:12]
     minio_path = await upload_raw_file(file_path, supplier_guess, content_hash)
 
+    # Suggestion IA immédiate (best-effort — la demande est créée même si ça échoue)
+    yaml_proposed = ""
+    initial_prompt = ""
+    confidence: int | None = None
+    confidence_source: str | None = None
+    try:
+        from middleware.ai.yaml_generator import generate_yaml_from_excel
+
+        ai_supplier_guess, yaml_content, prompt, confidence = generate_yaml_from_excel(
+            file_path=file_path,
+            folder_name=request.folder_name,
+            filename=request.filename,
+        )
+        yaml_proposed = _inject_sharepoint_folder(yaml_content, request.folder_name)
+        initial_prompt = prompt
+        confidence_source = "ai_generated"
+        supplier_guess = ai_supplier_guess
+    except Exception as exc:
+        logger.warning(
+            "génération IA automatique échouée à l'ingestion — demande créée sans suggestion",
+            filename=request.filename,
+            erreur=str(exc),
+        )
+
     meta = {
         "id": pending_id,
         "created_at": datetime.utcnow().isoformat(),
@@ -129,8 +159,10 @@ async def ingest_unknown(request: UnknownIngestRequest) -> UnknownIngestResponse
         "folder_name": request.folder_name,
         "file_path": request.file_path,
         "supplier_guess": supplier_guess,
-        "yaml_proposed": "",
-        "initial_prompt": "",
+        "yaml_proposed": yaml_proposed,
+        "initial_prompt": initial_prompt,
+        "confidence": confidence,
+        "confidence_source": confidence_source,
         "web_url": request.web_url,
         "sharepoint_item_id": request.sharepoint_item_id,
         "minio_path": minio_path,
