@@ -231,7 +231,15 @@ def _handle_unknown_supplier(item):
         )
         resp.raise_for_status()
         data = resp.json()
-        print(f"  → Envoyé pour validation. Fournisseur suggéré : '{data['supplier_guess']}' (ID: {pending_id})")
+        # ID réellement utilisé côté serveur — peut différer de `pending_id` (généré
+        # localement ci-dessus) si l'API a détecté un doublon et réutilisé une demande
+        # déjà existante à la place d'en créer une nouvelle.
+        actual_id = data.get("pending_id", pending_id)
+        note = " [doublon réutilisé]" if actual_id != pending_id else ""
+        print(
+            f"  → Envoyé pour validation. Fournisseur suggéré : "
+            f"'{data['supplier_guess']}' (ID: {actual_id}){note}"
+        )
     except Exception as exc:
         print(f"  → Erreur envoi analyse IA : {exc}")
         file_path.unlink(missing_ok=True)
