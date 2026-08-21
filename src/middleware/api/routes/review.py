@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.ai.yaml_generator import edit_yaml_with_ai, generate_yaml_from_excel, read_excel_preview
@@ -32,6 +34,23 @@ def _load_pending(pending_id: str) -> dict:
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail=f"Demande introuvable : {pending_id}")
     return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _friendly_processing_error(exc: Exception) -> str:
+    """Transforme une erreur technique de traitement en message actionnable pour le métier."""
+    if isinstance(exc, IntegrityError) and "uq_products_supplier_code" in str(exc):
+        m = re.search(
+            r"Key \(supplier_id, supplier_product_code\)=\([^,]+, ([^)]+)\) already exists",
+            str(exc),
+        )
+        code = m.group(1) if m else "?"
+        return (
+            f"deux lignes du fichier génèrent le même code produit ({code}). "
+            "Le modèle de code (ou le mapping des colonnes) doit inclure un champ qui "
+            "distingue mieux les produits entre eux — demandez l'aide du support pour "
+            "ajuster le mapping."
+        )
+    return f"le traitement a échoué : {exc}"
 
 
 def _html_page(title: str, message: str, color: str = "#1a7f5a") -> HTMLResponse:
@@ -387,7 +406,7 @@ async def approve_pending(
         return ApproveResult(
             kind="processing_error",
             title="Erreur de traitement",
-            message=f"Le YAML est enregistré mais le traitement a échoué : {exc}",
+            message=f"Le YAML est enregistré, mais {_friendly_processing_error(exc)}",
             supplier_code=supplier_code,
         )
 
