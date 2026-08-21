@@ -130,6 +130,15 @@ st.markdown(
     .badge-ko   { color: #A30F12; background: #FDEAEA; border-color: #D41317; }
     .badge-support { color: #8A5A00; background: #FFF3E0; border-color: #F39C12; }
 
+    /* Titres de section (expanders utilisés à la place des ##### pour être repliables) :
+       le libellé de l'en-tête n'est pas gras par défaut chez Streamlit — on le force ici. */
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stExpander"] summary span {
+        font-weight: 700 !important;
+        color: #003D7C;
+    }
+
     hr { border-color: #E3E8EE; }
     </style>
     """,
@@ -2651,7 +2660,15 @@ if vue == "❓ Aide":
     render_help_view()
     st.stop()
 
-st.subheader("Validation des mappings fournisseurs générés par IA")
+st.markdown(
+    '<div style="text-align:center;padding:6px 0 20px">'
+    '<div style="font-size:27px;font-weight:700;color:#003D7C;letter-spacing:.3px">'
+    'Validation des mappings fournisseurs générés par IA</div>'
+    '<div style="width:64px;height:3px;background:#003D7C;margin:10px auto 0;'
+    'border-radius:2px"></div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
 if "last_action_html" in st.session_state:
     show_action_result(st.session_state.pop("last_action_html"))
@@ -2699,7 +2716,15 @@ pending_id = filtered[selected_idx]["id"]
 
 meta = fetch_detail(pending_id)
 
-st.subheader(meta["filename"])
+_title_col, _link_col = st.columns([5, 1.3])
+with _title_col:
+    st.subheader(meta["filename"])
+with _link_col:
+    web_url = meta.get("web_url")
+    if web_url:
+        st.markdown('<div style="margin-top:10px"></div>', unsafe_allow_html=True)
+        st.link_button("📂 SharePoint", web_url, use_container_width=True)
+
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Fournisseur deviné", meta["supplier_guess"])
 c2.metric("Dossier SharePoint", meta["folder_name"])
@@ -2710,19 +2735,33 @@ c3.markdown(
 )
 c4.metric("Créé le", meta["created_at"][:19].replace("T", " "))
 
+if not meta.get("web_url"):
+    st.caption("Le lien d'ouverture SharePoint apparaît pour les fichiers détectés "
+               "par le watcher (nouvelles demandes).")
+
 _yaml_mode = load_yaml(meta.get("yaml_proposed") or "").get("extraction_mode")
 _confidence_val = meta.get("confidence")
-_gauge_col, _diff_col = st.columns([3, 1])
-with _gauge_col:
-    if _confidence_val is not None:
-        st.caption(f"💡 Confiance de la suggestion : {_confidence_val}%")
-        st.progress(max(0, min(100, int(_confidence_val))) / 100)
-with _diff_col:
-    if _yaml_mode:
-        _is_complicated = _yaml_mode in ("matrix", "multi_table") or (
-            _confidence_val is not None and _confidence_val < 70
-        )
-        st.caption("🟠 Compliqué" if _is_complicated else "🟢 Simple")
+if _confidence_val is not None:
+    st.markdown(
+        f'<div style="text-align:center;padding:10px 0 2px">'
+        f'<div style="font-size:13px;color:#4A4A49;letter-spacing:.3px">'
+        f'💡 CONFIANCE DE LA SUGGESTION</div>'
+        f'<div style="font-size:44px;font-weight:700;color:#003D7C;line-height:1.2">'
+        f'{_confidence_val}%</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    st.progress(max(0, min(100, int(_confidence_val))) / 100)
+if _yaml_mode:
+    _is_complicated = _yaml_mode in ("matrix", "multi_table") or (
+        _confidence_val is not None and _confidence_val < 70
+    )
+    st.markdown(
+        f'<div style="text-align:center;padding-bottom:6px">'
+        f'{"🟠 Compliqué" if _is_complicated else "🟢 Simple"}</div>',
+        unsafe_allow_html=True,
+    )
+st.divider()
 
 sheets_key = f"sheets_list_{pending_id}"
 if sheets_key not in st.session_state:
@@ -2761,91 +2800,15 @@ def set_yaml_text(new_text: str) -> None:
     st.session_state[_staged_key] = new_text
     st.rerun()
 
-# Écran partagé : édition à gauche, aperçu Excel (grille A,B,C + lignes) à droite.
-col_edit, col_preview = st.columns([3, 2])
-
-with col_preview:
-    st.markdown("##### 📄 Aperçu du fichier")
-    render_excel_grid(preview_text)
-    web_url = meta.get("web_url")
-    if web_url:
-        st.link_button("📂 Ouvrir le fichier dans SharePoint", web_url, use_container_width=True)
-    else:
-        st.caption("Le lien d'ouverture SharePoint apparaît pour les fichiers détectés "
-                   "par le watcher (nouvelles demandes).")
-
-    st.divider()
-    st.markdown("##### 📤 Aperçu export Gery")
-
-    _preview_key = f"gery_preview_{pending_id}"
-    _cached = st.session_state.get(_preview_key, {})
-    _cur_yaml = st.session_state.get(yaml_content_key, "")
-    _force = st.session_state.pop(f"force_recalc_{pending_id}", False)
-
-    if st.button("🔄 Recalculer l'aperçu", key=f"recalc_preview_{pending_id}"):
-        _force = True
-
-    if _cur_yaml.strip() and (_force or _cached.get("_yaml") != _cur_yaml):
-        with st.spinner("Calcul de l'aperçu…"):
-            _pr = api_post(
-                f"/api/v1/review/{pending_id}/export-preview",
-                {"yaml_content": _cur_yaml},
-            )
-        if _pr.status_code == 200:
-            _pd = _pr.json()
-            _pd["_yaml"] = _cur_yaml
-            st.session_state[_preview_key] = _pd
-            _cached = _pd
-        elif _pr.status_code == 422:
-            st.warning("YAML invalide — corrigez le mapping pour voir l'aperçu.")
-            _cached = {}
-        else:
-            st.warning(f"Aperçu indisponible ({_pr.status_code}).")
-            _cached = {}
-
-    if _cached:
-        # Bloc métadonnées cartouche — toujours affiché si dispo
-        _fm = _cached.get("file_metadata") or {}
-        if _fm:
-            _meta_parts = []
-            _rows_have_generic_code = any(
-                r.get("Article générique associé") for r in _cached.get("rows", [])
-            )
-            if _fm.get("ramery_generic_code"):
-                _meta_parts.append(f"**Code générique Ramery :** `{_fm['ramery_generic_code']}`")
-            elif _rows_have_generic_code:
-                _meta_parts.append("**Code générique Ramery :** _variable par produit (colonne dédiée — voir aperçu export ci-dessous)_")
-            else:
-                _meta_parts.append("**Code générique Ramery :** ⚠️ *non trouvé — vérifiez `columns.generic_code` ou `file_metadata.ramery_generic_code`*")
-            if _fm.get("siren_fournisseur"):
-                _meta_parts.append(f"**SIREN Fournisseur :** `{_fm['siren_fournisseur']}`")
-            if _fm.get("validity_start"):
-                _meta_parts.append(f"**Validité :** {_fm['validity_start']} → {_fm.get('validity_end', '?')}")
-            if _fm.get("contract_reference"):
-                _meta_parts.append(f"**Réf. contrat :** {_fm['contract_reference']}")
-            st.info("  ·  ".join(_meta_parts))
-
-        if not _cached.get("export_enabled"):
-            st.info("Export Gery désactivé pour ce fournisseur.")
-        elif _cached.get("line_count", 0) == 0:
-            st.warning(
-                f"{_cached.get('products_parsed', 0)} produit(s) lus, 0 ligne générée. "
-                "Vérifiez les colonnes."
-            )
-        else:
-            st.caption(f"{_cached['line_count']} ligne(s) · {_cached['products_parsed']} produit(s)")
-            st.dataframe(_cached["rows"], use_container_width=True, hide_index=True)
-    elif not _cur_yaml.strip():
-        st.caption("💡 Rédigez ou générez un YAML pour voir l'aperçu.")
-
-with col_edit:
-    _tab_labels = ["YAML", "🧩 Formulaire simplifié"]
-    if SHOW_ADVANCED_TABS:
-        _tab_labels += ["🛠️ Formulaire avancé", "🤖 Assistant IA"]
-    _tabs = st.tabs(_tab_labels)
-    tab_yaml, tab_simple = _tabs[0], _tabs[1]
-    if SHOW_ADVANCED_TABS:
-        tab_form, tab_ai = _tabs[2], _tabs[3]
+# Les onglets d'édition (YAML / Formulaire simplifié) occupent toute la largeur ;
+# les aperçus (fichier + export Gery) sont affichés plus bas, après les onglets.
+_tab_labels = ["YAML", "🧩 Formulaire simplifié"]
+if SHOW_ADVANCED_TABS:
+    _tab_labels += ["🛠️ Formulaire avancé", "🤖 Assistant IA"]
+_tabs = st.tabs(_tab_labels)
+tab_yaml, tab_simple = _tabs[0], _tabs[1]
+if SHOW_ADVANCED_TABS:
+    tab_form, tab_ai = _tabs[2], _tabs[3]
 
 with tab_yaml:
     # ── Charger un YAML existant du même dossier ──────────────────────────
@@ -3090,6 +3053,74 @@ if SHOW_ADVANCED_TABS:
                     ("assistant", f"Erreur {resp.status_code} : {resp.text[:200]}")
                 )
                 st.rerun()
+
+st.divider()
+st.markdown("##### 📄 Aperçu du fichier")
+render_excel_grid(preview_text)
+
+st.divider()
+st.markdown("##### 📤 Aperçu export Gery")
+
+_preview_key = f"gery_preview_{pending_id}"
+_cached = st.session_state.get(_preview_key, {})
+_cur_yaml = st.session_state.get(yaml_content_key, "")
+_force = st.session_state.pop(f"force_recalc_{pending_id}", False)
+
+if st.button("🔄 Recalculer l'aperçu", key=f"recalc_preview_{pending_id}"):
+    _force = True
+
+if _cur_yaml.strip() and (_force or _cached.get("_yaml") != _cur_yaml):
+    with st.spinner("Calcul de l'aperçu…"):
+        _pr = api_post(
+            f"/api/v1/review/{pending_id}/export-preview",
+            {"yaml_content": _cur_yaml},
+        )
+    if _pr.status_code == 200:
+        _pd = _pr.json()
+        _pd["_yaml"] = _cur_yaml
+        st.session_state[_preview_key] = _pd
+        _cached = _pd
+    elif _pr.status_code == 422:
+        st.warning("YAML invalide — corrigez le mapping pour voir l'aperçu.")
+        _cached = {}
+    else:
+        st.warning(f"Aperçu indisponible ({_pr.status_code}).")
+        _cached = {}
+
+if _cached:
+    # Bloc métadonnées cartouche — toujours affiché si dispo
+    _fm = _cached.get("file_metadata") or {}
+    if _fm:
+        _meta_parts = []
+        _rows_have_generic_code = any(
+            r.get("Article générique associé") for r in _cached.get("rows", [])
+        )
+        if _fm.get("ramery_generic_code"):
+            _meta_parts.append(f"**Code générique Ramery :** `{_fm['ramery_generic_code']}`")
+        elif _rows_have_generic_code:
+            _meta_parts.append("**Code générique Ramery :** _variable par produit (colonne dédiée — voir aperçu export ci-dessous)_")
+        else:
+            _meta_parts.append("**Code générique Ramery :** ⚠️ *non trouvé — vérifiez `columns.generic_code` ou `file_metadata.ramery_generic_code`*")
+        if _fm.get("siren_fournisseur"):
+            _meta_parts.append(f"**SIREN Fournisseur :** `{_fm['siren_fournisseur']}`")
+        if _fm.get("validity_start"):
+            _meta_parts.append(f"**Validité :** {_fm['validity_start']} → {_fm.get('validity_end', '?')}")
+        if _fm.get("contract_reference"):
+            _meta_parts.append(f"**Réf. contrat :** {_fm['contract_reference']}")
+        st.info("  ·  ".join(_meta_parts))
+
+    if not _cached.get("export_enabled"):
+        st.info("Export Gery désactivé pour ce fournisseur.")
+    elif _cached.get("line_count", 0) == 0:
+        st.warning(
+            f"{_cached.get('products_parsed', 0)} produit(s) lus, 0 ligne générée. "
+            "Vérifiez les colonnes."
+        )
+    else:
+        st.caption(f"{_cached['line_count']} ligne(s) · {_cached['products_parsed']} produit(s)")
+        st.dataframe(_cached["rows"], use_container_width=True, hide_index=True)
+elif not _cur_yaml.strip():
+    st.caption("💡 Rédigez ou générez un YAML pour voir l'aperçu.")
 
 st.divider()
 
