@@ -59,6 +59,8 @@ services:
       dockerfile: Dockerfile
       target: runtime
     container_name: middleware-api
+    env_file:
+      - .env
     environment:
       MIDDLEWARE_DATABASE_URL: postgresql+asyncpg://middleware:middleware@postgres:5432/middleware
       MIDDLEWARE_STORAGE_ENDPOINT: http://minio:9000

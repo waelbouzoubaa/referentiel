@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +16,7 @@ from middleware.core.logging import get_logger
 from middleware.db.session import get_session
 from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import NEW_ARTICLE_COLS, build_new_article_rows
+from middleware.notifications import send_support_notification
 from middleware.parser.excel_reader import list_sheet_names
 from middleware.parser.yaml_loader import validate_mapping_yaml
 from middleware.pipeline import parse_with_rule, process_and_export
@@ -132,13 +133,17 @@ class EscalateRequest(BaseModel):
 
 
 @router.post("/review/{pending_id}/escalate", tags=["validation"])
-def escalate_pending(pending_id: str, request: EscalateRequest) -> dict:
+def escalate_pending(
+    pending_id: str, request: EscalateRequest, background_tasks: BackgroundTasks
+) -> dict:
     """Bascule une demande vers/depuis la file « Aide support » (statut needs_support).
 
     Une demande needs_support reste éditable et validable exactement comme une
     demande pending (voir les gardes de statut ci-dessous) — c'est juste une file
     de triage séparée pour que l'équipe dev retrouve facilement les cas compliqués
-    signalés par le métier.
+    signalés par le métier. Une escalade (pas le retour en arrière) déclenche une
+    notification email au support, en tâche de fond (best-effort, ne bloque jamais
+    la réponse).
     """
     meta = _load_pending(pending_id)
     if request.escalated:
@@ -157,6 +162,19 @@ def escalate_pending(pending_id: str, request: EscalateRequest) -> dict:
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     logger.info("statut d'escalade modifié", pending_id=pending_id, status=meta["status"])
+
+    if request.escalated:
+        background_tasks.add_task(
+            send_support_notification,
+            f"🆘 Aide support demandée — {meta.get('supplier_guess', pending_id)}",
+            "Une demande de validation a besoin d'aide.\n\n"
+            f"Fournisseur : {meta.get('supplier_guess', '?')}\n"
+            f"Fichier : {meta.get('filename', '?')}\n"
+            f"Dossier SharePoint : {meta.get('folder_name', '?')}\n"
+            f"Identifiant de la demande : {pending_id}\n\n"
+            "Ouvrez l'interface de validation, onglet « 🆘 Aide support », pour la traiter.",
+        )
+
     return {"ok": True, "status": meta["status"]}
 
 

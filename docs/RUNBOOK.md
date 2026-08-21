@@ -112,9 +112,12 @@ Dans les logs du watcher, on voit : `[AJOUTE]/[MODIFIE] <fichier> → ...`. Deux
 
 ### b) Cas trop compliqué pour le métier
 Bouton **« 🆘 Demander l'aide du support »** (à la place de Valider) → la demande passe
-dans la file latérale **« 🆘 Aide support »**. L'équipe dev la traite depuis là (YAML à la
-main, Formulaire avancé, ou Assistant IA), puis clique Valider normalement. Bouton inverse
-**« ↩️ Remettre en attente métier »** si besoin de la renvoyer.
+dans la file latérale **« 🆘 Aide support »**, et un email de notification part (best-effort)
+à l'adresse `MIDDLEWARE_SUPPORT_NOTIFY_EMAIL` (voir `.env` — sans SMTP configuré,
+`MIDDLEWARE_SMTP_HOST` vide, l'escalade fonctionne quand même mais aucun email n'est envoyé,
+juste un avertissement dans les logs `api`). L'équipe dev traite la demande depuis là (YAML à
+la main, Formulaire avancé, ou Assistant IA), puis clique Valider normalement. Bouton inverse
+**« ↩️ Remettre en attente métier »** si besoin de la renvoyer (pas de notification dans ce sens).
 
 > Détail pour créer un mapping à la main : `docs/GUIDE_YAML_TABLE.md` (mode table),
 > `GUIDE_YAML_MATRIX.md` (grille de prix), `GUIDE_YAML_MULTI_TABLE.md` (plusieurs tableaux).

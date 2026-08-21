@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     sage_backend: str = "file"
     sage_mapping_file: str = "config/sage_codes.csv"
 
+    # ── Notification email (demande d'aide support) ──────────────────────────
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+    support_notify_email: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
