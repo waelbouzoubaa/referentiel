@@ -1018,11 +1018,16 @@ def render_table_form_simple(
         )
         decimal_fmt = _decimal_format_picker(right)
 
-    siren_current = (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "") \
-        if file_metadata.get("siren_fournisseur") else (_SRC_NONE, "")
+    siren_current = (
+        (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "")
+        if (file_metadata.get("siren_fournisseur") or {}).get("cell") else
+        (_SRC_FIXED, (file_metadata.get("siren_fournisseur") or {}).get("constant") or "")
+        if (file_metadata.get("siren_fournisseur") or {}).get("constant") else
+        (_SRC_NONE, "")
+    )
     siren_src, siren_val, _ = _source_field(
         "SIREN Fournisseur", "",
-        pending_id, "siren", [_SRC_CELL, _SRC_NONE], columns,
+        pending_id, "siren", [_SRC_CELL, _SRC_FIXED, _SRC_NONE], columns,
         siren_current[0], siren_current[1],
     )
 
@@ -1093,6 +1098,8 @@ def render_table_form_simple(
         new_file_metadata["validity_end"] = {"cell": ve_val, "transform": date_fmt}
     if siren_src == _SRC_CELL and siren_val:
         new_file_metadata["siren_fournisseur"] = {"cell": siren_val}
+    elif siren_src == _SRC_FIXED and siren_val:
+        new_file_metadata["siren_fournisseur"] = {"constant": siren_val}
 
     if family_src == _SRC_COLUMN and family_val:
         new_columns["family"] = {"source_col": family_val, "transform": "strip"}
@@ -1726,10 +1733,15 @@ def render_matrix_form_simple(
         detected_columns, generic_current[0], generic_current[1],
     )
 
-    siren_current = (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "") \
-        if file_metadata.get("siren_fournisseur") else (_SRC_NONE, "")
+    siren_current = (
+        (_SRC_CELL, (file_metadata.get("siren_fournisseur") or {}).get("cell") or "")
+        if (file_metadata.get("siren_fournisseur") or {}).get("cell") else
+        (_SRC_FIXED, (file_metadata.get("siren_fournisseur") or {}).get("constant") or "")
+        if (file_metadata.get("siren_fournisseur") or {}).get("constant") else
+        (_SRC_NONE, "")
+    )
     siren_src, siren_val, _ = _source_field(
-        "SIREN Fournisseur", "", pending_id, "mx_siren", [_SRC_CELL, _SRC_NONE],
+        "SIREN Fournisseur", "", pending_id, "mx_siren", [_SRC_CELL, _SRC_FIXED, _SRC_NONE],
         detected_columns, siren_current[0], siren_current[1],
     )
 
@@ -1803,6 +1815,8 @@ def render_matrix_form_simple(
         new_file_metadata["validity_end"] = {"cell": ve_val, "transform": date_fmt}
     if siren_src == _SRC_CELL and siren_val:
         new_file_metadata["siren_fournisseur"] = {"cell": siren_val}
+    elif siren_src == _SRC_FIXED and siren_val:
+        new_file_metadata["siren_fournisseur"] = {"constant": siren_val}
 
     if family_src == _SRC_COLUMN and family_val:
         new_pc["family"] = {"source_col": family_val, "transform": "strip"}
