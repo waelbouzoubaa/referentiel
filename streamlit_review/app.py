@@ -2702,6 +2702,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if "last_action_result" in st.session_state:
+    show_action_result(st.session_state.pop("last_action_result"))
+
 try:
     pending_items = fetch_pending_list()
 except Exception as exc:
@@ -3191,9 +3194,6 @@ else:
     ):
         api_post(f"/api/v1/review/{pending_id}/escalate", {"escalated": True})
         st.rerun()
-
-if "last_action_result" in st.session_state:
-    show_action_result(st.session_state.pop("last_action_result"))
 
 # Téléchargement des fichiers Gery générés (après validation)
 exports = meta.get("exports") or []
