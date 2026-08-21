@@ -38,24 +38,45 @@ def _load_pending(pending_id: str) -> dict:
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
-def _support_email_body(pending_id: str, meta: dict) -> str:
-    """Construit le corps de l'email envoyé au support lors d'une escalade."""
-    lines = [
-        "Une demande de validation a besoin d'aide.",
-        "",
-        f"Fournisseur : {meta.get('supplier_guess', '?')}",
-        f"Fichier : {meta.get('filename', '?')}",
-        f"Dossier SharePoint : {meta.get('folder_name', '?')}",
-        f"Identifiant de la demande : {pending_id}",
-        "",
-    ]
+# ── Email envoyé au support lors d'une escalade ("🆘 Demander l'aide du support") ─
+# Modifiable directement ici : {supplier}, {filename}, {folder}, {pending_id}, {link}
+# sont remplacés automatiquement par les infos de la demande à l'envoi.
+SUPPORT_EMAIL_SUBJECT = "[Support] Demande d'assistance pour validation — Fournisseur {supplier}"
+
+SUPPORT_EMAIL_BODY = """Bonjour,
+
+Une demande de validation concernant le fournisseur {supplier} nécessite une intervention support.
+
+Voici les informations et détails du fichier :
+Fournisseur : {supplier}
+Fichier : {filename}
+Dossier SharePoint : {folder}
+ID de la demande : {pending_id}
+
+{link}
+
+Merci de bien vouloir traiter ce dossier depuis l'interface de validation, dans l'onglet « 🆘 Aide support ».
+
+Cordialement,
+Middleware Ramery"""
+
+
+def _support_email_content(pending_id: str, meta: dict) -> tuple[str, str]:
+    """Construit (sujet, corps) de l'email envoyé au support lors d'une escalade."""
     review_ui_url = get_settings().review_ui_url
-    if review_ui_url:
-        lines.append(f"Ouvrez l'interface de validation : {review_ui_url}")
-        lines.append("(onglet « 🆘 Aide support » dans la barre latérale)")
-    else:
-        lines.append("Ouvrez l'interface de validation, onglet « 🆘 Aide support », pour la traiter.")
-    return "\n".join(lines)
+    link = (
+        f"Ouvrir l'interface de validation : {review_ui_url}"
+        if review_ui_url
+        else "Interface de validation : (lien non configuré — voir MIDDLEWARE_REVIEW_UI_URL)"
+    )
+    values = {
+        "supplier": meta.get("supplier_guess", "?"),
+        "filename": meta.get("filename", "?"),
+        "folder": meta.get("folder_name", "?"),
+        "pending_id": pending_id,
+        "link": link,
+    }
+    return SUPPORT_EMAIL_SUBJECT.format(**values), SUPPORT_EMAIL_BODY.format(**values)
 
 
 def _friendly_processing_error(exc: Exception) -> str:
@@ -185,11 +206,8 @@ def escalate_pending(
     logger.info("statut d'escalade modifié", pending_id=pending_id, status=meta["status"])
 
     if request.escalated:
-        background_tasks.add_task(
-            send_support_notification,
-            f"🆘 Aide support demandée — {meta.get('supplier_guess', pending_id)}",
-            _support_email_body(pending_id, meta),
-        )
+        subject, body = _support_email_content(pending_id, meta)
+        background_tasks.add_task(send_support_notification, subject, body)
 
     return {"ok": True, "status": meta["status"]}
 
