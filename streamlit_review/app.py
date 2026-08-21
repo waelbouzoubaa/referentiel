@@ -25,6 +25,9 @@ API_URL = os.environ.get("MIDDLEWARE_API_URL", "http://api:8000")
 # (masqués par défaut — le métier n'utilise que YAML / Formulaire simplifié).
 SHOW_ADVANCED_TABS = False
 
+# Mettre à True pour réafficher la vue « ❓ Aide » dans le sélecteur de la sidebar.
+SHOW_HELP_VIEW = False
+
 TRANSFORMS_VALIDES = [
     "strip",
     "strip_upper",
@@ -2684,7 +2687,10 @@ FORM_RENDERERS = {
 
 render_sidebar_header()
 
-vue = st.sidebar.radio("Vue", ["Validation des mappings", "Exports Gery", "❓ Aide"])
+_vue_options = ["Validation des mappings", "Exports Gery"]
+if SHOW_HELP_VIEW:
+    _vue_options.append("❓ Aide")
+vue = st.sidebar.radio("Vue", _vue_options)
 if vue == "Exports Gery":
     render_exports_view()
     st.stop()
