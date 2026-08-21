@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.ai.yaml_generator import edit_yaml_with_ai, generate_yaml_from_excel, read_excel_preview
+from middleware.core.config import get_settings
 from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
 from middleware.db.session import get_session
@@ -35,6 +36,26 @@ def _load_pending(pending_id: str) -> dict:
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail=f"Demande introuvable : {pending_id}")
     return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _support_email_body(pending_id: str, meta: dict) -> str:
+    """Construit le corps de l'email envoyé au support lors d'une escalade."""
+    lines = [
+        "Une demande de validation a besoin d'aide.",
+        "",
+        f"Fournisseur : {meta.get('supplier_guess', '?')}",
+        f"Fichier : {meta.get('filename', '?')}",
+        f"Dossier SharePoint : {meta.get('folder_name', '?')}",
+        f"Identifiant de la demande : {pending_id}",
+        "",
+    ]
+    review_ui_url = get_settings().review_ui_url
+    if review_ui_url:
+        lines.append(f"Ouvrez l'interface de validation : {review_ui_url}")
+        lines.append("(onglet « 🆘 Aide support » dans la barre latérale)")
+    else:
+        lines.append("Ouvrez l'interface de validation, onglet « 🆘 Aide support », pour la traiter.")
+    return "\n".join(lines)
 
 
 def _friendly_processing_error(exc: Exception) -> str:
@@ -167,12 +188,7 @@ def escalate_pending(
         background_tasks.add_task(
             send_support_notification,
             f"🆘 Aide support demandée — {meta.get('supplier_guess', pending_id)}",
-            "Une demande de validation a besoin d'aide.\n\n"
-            f"Fournisseur : {meta.get('supplier_guess', '?')}\n"
-            f"Fichier : {meta.get('filename', '?')}\n"
-            f"Dossier SharePoint : {meta.get('folder_name', '?')}\n"
-            f"Identifiant de la demande : {pending_id}\n\n"
-            "Ouvrez l'interface de validation, onglet « 🆘 Aide support », pour la traiter.",
+            _support_email_body(pending_id, meta),
         )
 
     return {"ok": True, "status": meta["status"]}

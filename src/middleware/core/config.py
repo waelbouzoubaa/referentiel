@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     sage_mapping_file: str = "config/sage_codes.csv"
 
     # ── Notification email (demande d'aide support) ──────────────────────────
+    # URL publique de l'interface de validation (Streamlit), incluse dans l'email
+    # pour que le support clique directement dessus. Vide = pas de lien dans l'email.
+    review_ui_url: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
