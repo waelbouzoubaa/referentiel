@@ -396,10 +396,28 @@ def coerce_value(text: str) -> Any:
     return text
 
 
-def show_action_result(html: str) -> None:
-    import streamlit.components.v1 as components
+def show_action_result(result: dict) -> None:
+    kind = result.get("kind")
+    title = result.get("title", "")
+    message = result.get("message", "")
 
-    components.html(html, height=180, scrolling=False)
+    if kind == "success":
+        st.success(f"**{title}** — {message}")
+        exports = result.get("exports") or []
+        if exports:
+            st.markdown("**Fichiers Gery générés :**")
+            for e in exports:
+                st.caption(f"📄 {e['filename']} — {e['line_count']} ligne(s)")
+        else:
+            st.caption("Aucun fichier généré (export désactivé ou aucun changement).")
+    elif kind == "invalid_yaml":
+        st.error(f"**{title}** — {message}")
+        for err in result.get("errors") or []:
+            st.caption(f"- {err}")
+    elif kind in ("file_missing", "processing_error"):
+        st.error(f"**{title}** — {message}")
+    else:
+        st.info(f"**{title}** — {message}")
 
 
 def date_transform_selector(pending_id: str, current: str | None, suffix: str = "") -> str:
@@ -2684,8 +2702,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "last_action_html" in st.session_state:
-    show_action_result(st.session_state.pop("last_action_html"))
+if "last_action_result" in st.session_state:
+    show_action_result(st.session_state.pop("last_action_result"))
 
 try:
     pending_items = fetch_pending_list()
@@ -3163,7 +3181,7 @@ if action_col1.button(
     key=f"approve_{pending_id}",
 ):
     resp = api_get(f"/api/v1/review/{pending_id}/approve")
-    st.session_state["last_action_html"] = resp.text
+    st.session_state["last_action_result"] = resp.json()
     st.rerun()
 
 if meta["status"] == "needs_support":

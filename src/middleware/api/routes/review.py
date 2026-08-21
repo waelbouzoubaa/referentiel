@@ -314,28 +314,43 @@ def ai_edit(pending_id: str, request: AiEditRequest) -> dict:
     }
 
 
-@router.get("/review/{pending_id}/approve", response_class=HTMLResponse, tags=["validation"])
+class ExportFileResult(BaseModel):
+    filename: str
+    line_count: int
+
+
+class ApproveResult(BaseModel):
+    kind: str  # "already_processed" | "invalid_yaml" | "file_missing" | "processing_error" | "success"
+    title: str
+    message: str
+    supplier_code: str | None = None
+    errors: list[str] | None = None
+    exports: list[ExportFileResult] | None = None
+
+
+@router.get("/review/{pending_id}/approve", tags=["validation"])
 async def approve_pending(
     pending_id: str, session: AsyncSession = Depends(get_session)
-) -> HTMLResponse:
+) -> ApproveResult:
     """Approuve le YAML, le sauvegarde, puis traite le fichier (DB + MinIO + export CSV)."""
     meta = _load_pending(pending_id)
 
     if meta["status"] not in ("pending", "needs_support"):
-        return _html_page(
-            "Déjà traité",
-            f"Cette demande a déjà été {meta['status']}.",
-            color="#888",
+        return ApproveResult(
+            kind="already_processed",
+            title="Déjà traité",
+            message=f"Cette demande a déjà été {meta['status']}.",
         )
 
     # Valider le YAML avant toute écriture
     yaml_content = meta["yaml_proposed"]
     rule, erreurs = validate_mapping_yaml(yaml_content)
     if erreurs or rule is None:
-        return _html_page(
-            "YAML invalide",
-            "Corrigez la configuration avant de valider :<br>" + "<br>".join(erreurs),
-            color="#c0392b",
+        return ApproveResult(
+            kind="invalid_yaml",
+            title="YAML invalide",
+            message="Corrigez la configuration avant de valider.",
+            errors=erreurs,
         )
     supplier_code = rule.supplier_code
 
@@ -347,11 +362,12 @@ async def approve_pending(
 
     file_path = Path(meta.get("file_path", ""))
     if not file_path.exists():
-        return _html_page(
-            "Fichier source introuvable",
-            f"Le YAML de <strong>{supplier_code}</strong> est enregistré, mais le fichier "
-            f"source est introuvable — à retraiter manuellement.",
-            color="#c0392b",
+        return ApproveResult(
+            kind="file_missing",
+            title="Fichier source introuvable",
+            message=f"Le YAML de {supplier_code} est enregistré, mais le fichier source "
+                    f"est introuvable — à retraiter manuellement.",
+            supplier_code=supplier_code,
         )
 
     # Traitement complet via le service partagé (archivage MinIO, DB, export CSV)
@@ -368,10 +384,11 @@ async def approve_pending(
     except Exception as exc:
         await session.rollback()
         logger.error("erreur traitement après approbation", erreur=str(exc))
-        return _html_page(
-            "Erreur de traitement",
-            f"Le YAML est enregistré mais le traitement a échoué : {exc}",
-            color="#c0392b",
+        return ApproveResult(
+            kind="processing_error",
+            title="Erreur de traitement",
+            message=f"Le YAML est enregistré mais le traitement a échoué : {exc}",
+            supplier_code=supplier_code,
         )
 
     exports = [f.path.name for f in export_result.files]
@@ -384,14 +401,15 @@ async def approve_pending(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    exports_html = "<br>".join(
-        f"• {e} ({f.line_count} lignes)" for e, f in zip(exports, export_result.files, strict=True)
-    ) or "Aucun fichier généré (export désactivé ou aucun changement)."
-    return _html_page(
-        "✓ YAML approuvé",
-        f"Le fournisseur <strong>{supplier_code}</strong> est configuré et traité.<br><br>"
-        f"Fichiers Gery générés :<br>{exports_html}",
-        color="#1a7f5a",
+    return ApproveResult(
+        kind="success",
+        title="YAML approuvé",
+        message=f"Le fournisseur {supplier_code} est configuré et traité.",
+        supplier_code=supplier_code,
+        exports=[
+            ExportFileResult(filename=e, line_count=f.line_count)
+            for e, f in zip(exports, export_result.files, strict=True)
+        ],
     )
 
 
