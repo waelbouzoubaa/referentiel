@@ -2789,10 +2789,22 @@ preview_text = fetch_preview(pending_id, sheet=st.session_state.get(f"sheet_simp
 
 yaml_key = f"yaml_text_{pending_id}"
 yaml_content_key = f"yaml_content_{pending_id}"
+yaml_server_seen_key = f"yaml_server_seen_{pending_id}"
 if yaml_key not in st.session_state:
     st.session_state[yaml_key] = meta["yaml_proposed"]
-if yaml_content_key not in st.session_state:
     st.session_state[yaml_content_key] = meta["yaml_proposed"]
+    st.session_state[yaml_server_seen_key] = meta["yaml_proposed"]
+elif (
+    meta["yaml_proposed"] != st.session_state.get(yaml_server_seen_key)
+    and st.session_state[yaml_key] == st.session_state.get(yaml_server_seen_key)
+):
+    # La suggestion IA générée en tâche de fond est arrivée côté serveur après
+    # l'ouverture de cette session (par ex. onglet ouvert avant la fin de la
+    # génération) — on rattrape l'affichage tant que l'utilisateur n'a pas
+    # lui-même modifié le YAML localement (sinon on écraserait sa saisie).
+    st.session_state[yaml_key] = meta["yaml_proposed"]
+    st.session_state[yaml_content_key] = meta["yaml_proposed"]
+    st.session_state[yaml_server_seen_key] = meta["yaml_proposed"]
 
 # Streamlit interdit d'écrire dans st.session_state[yaml_key] une fois le widget
 # text_area (onglet YAML) instancié dans le même run — on passe donc par une clé de
@@ -2802,6 +2814,7 @@ if _staged_key in st.session_state:
     _staged_yaml = st.session_state.pop(_staged_key)
     st.session_state[yaml_key] = _staged_yaml
     st.session_state[yaml_content_key] = _staged_yaml
+    st.session_state[yaml_server_seen_key] = _staged_yaml
 
 
 def set_yaml_text(new_text: str) -> None:
@@ -2891,6 +2904,8 @@ with tab_yaml:
     if st.button("Enregistrer le YAML", key=f"save_yaml_{pending_id}"):
         resp = api_put(f"/api/v1/review/{pending_id}", {"yaml_content": st.session_state[yaml_key]})
         if resp.status_code == 200:
+            st.session_state[yaml_content_key] = st.session_state[yaml_key]
+            st.session_state[yaml_server_seen_key] = st.session_state[yaml_key]
             st.success("YAML enregistré et validé.")
         elif resp.status_code == 422:
             st.error("YAML invalide :")
