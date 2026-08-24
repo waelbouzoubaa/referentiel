@@ -292,7 +292,7 @@ def render_help_view() -> None:
 
 def render_exports_view() -> None:
     """Vue de consultation et téléchargement des exports Gery, groupés par fournisseur."""
-    st.subheader("📤 Exports Gery générés")
+    st.subheader("📤 Exportations Gery générées")
     st.caption(
         "Fichiers CSV produits automatiquement, organisés par dossier fournisseur. "
         "Cliquez sur 'YAML' pour voir la configuration appliquée."
@@ -2687,11 +2687,11 @@ FORM_RENDERERS = {
 
 render_sidebar_header()
 
-_vue_options = ["Validation des correspondances", "Exports Gery"]
+_vue_options = ["Validation des correspondances", "Exportations Gery"]
 if SHOW_HELP_VIEW:
     _vue_options.append("❓ Aide")
 vue = st.sidebar.radio("Vue", _vue_options)
-if vue == "Exports Gery":
+if vue == "Exportations Gery":
     render_exports_view()
     st.stop()
 if vue == "❓ Aide":
