@@ -3179,7 +3179,10 @@ if _cached:
         )
     else:
         st.caption(f"{_cached['line_count']} ligne(s) · {_cached['products_parsed']} produit(s)")
-        st.dataframe(_cached["rows"], use_container_width=True, hide_index=True)
+        import pandas as pd
+
+        _rows_df = pd.DataFrame(_cached["rows"]).fillna("Non renseigné")
+        st.dataframe(_rows_df, use_container_width=True, hide_index=True)
 elif not _cur_yaml.strip():
     st.caption("💡 Rédigez ou générez un YAML pour voir l'aperçu.")
 
