@@ -50,6 +50,7 @@ def parse_matrix_file(path: Path, rule: MappingRule) -> ParsingResult:
     )
 
     config = rule.as_matrix_config()
+    config.price_matrix.column_groups = _forward_fill_tier_labels(config.price_matrix.column_groups)
     file_metadata = _extract_file_metadata(sheet, rule.file_metadata)
     row_start, row_end = _parse_row_range(config.data_zone.rows)
 
@@ -381,6 +382,27 @@ def _extract_variants(
             ))
 
     return variants, []
+
+
+def _forward_fill_tier_labels(groups: list[ColumnGroup]) -> list[ColumnGroup]:
+    """Complète les `tier_label` vides avec le dernier palier non-vide rencontré.
+
+    Cas fréquent : le libellé de palier ("0-500m²") n'est écrit qu'une fois dans
+    le fichier source, au-dessus d'une paire de colonnes fusionnées (une variante
+    par colonne, ex: ALU puis BLANC) — la colonne de la 2e variante arrive donc
+    avec un tier_label vide dans le YAML. Sans ce correctif, tous les paliers
+    vides d'un même produit finissent avec les mêmes bornes (None, None) en
+    base, ce qui viole la contrainte d'unicité des prix (uq_prices_context).
+    """
+    filled: list[ColumnGroup] = []
+    last_label = ""
+    for group in groups:
+        label = group.tier_label.strip() or last_label
+        last_label = label or last_label
+        filled.append(
+            group if group.tier_label == label else group.model_copy(update={"tier_label": label})
+        )
+    return filled
 
 
 def _parse_tier_label(label: str) -> tuple[Decimal | None, Decimal | None, str | None]:
