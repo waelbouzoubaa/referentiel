@@ -42,7 +42,11 @@ TRANSFORMS_VALIDES = [
     "extract_integer",
 ]
 
-st.set_page_config(page_title="Validation mappings fournisseurs", layout="wide")
+st.set_page_config(
+    page_title="Validation mappings fournisseurs",
+    page_icon=str(_LOGO_PATH),
+    layout="wide",
+)
 
 st.markdown(
     """
