@@ -2687,7 +2687,7 @@ FORM_RENDERERS = {
 
 render_sidebar_header()
 
-_vue_options = ["Validation des mappings", "Exports Gery"]
+_vue_options = ["Validation des correspondances", "Exports Gery"]
 if SHOW_HELP_VIEW:
     _vue_options.append("❓ Aide")
 vue = st.sidebar.radio("Vue", _vue_options)
@@ -2701,7 +2701,7 @@ if vue == "❓ Aide":
 st.markdown(
     '<div style="text-align:center;padding:6px 0 20px">'
     '<div style="font-size:27px;font-weight:700;color:#003D7C;letter-spacing:.3px">'
-    'Validation des mappings fournisseurs générés par IA</div>'
+    'Validation des correspondances fournisseurs générés par IA</div>'
     '<div style="width:64px;height:3px;background:#003D7C;margin:10px auto 0;'
     'border-radius:2px"></div>'
     '</div>',
