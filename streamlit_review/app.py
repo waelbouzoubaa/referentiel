@@ -18,6 +18,7 @@ import streamlit as st
 from ruamel.yaml import YAML
 
 _LOGO_PATH = Path(__file__).parent / "logo.png"
+_FAVICON_PATH = Path(__file__).parent / "favicon.png"
 
 API_URL = os.environ.get("MIDDLEWARE_API_URL", "http://api:8000")
 
@@ -44,7 +45,7 @@ TRANSFORMS_VALIDES = [
 
 st.set_page_config(
     page_title="Validation mappings fournisseurs",
-    page_icon=str(_LOGO_PATH),
+    page_icon=str(_FAVICON_PATH),
     layout="wide",
 )
 
