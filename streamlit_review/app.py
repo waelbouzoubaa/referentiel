@@ -117,7 +117,7 @@ st.markdown(
     .stButton > button[kind="primary"]:hover,
     .stDownloadButton > button:hover { background: #002B58; border-color: #002B58; color: #FFFFFF; }
 
-    /* Cartes métriques (Fournisseur deviné, Dossier, Créé le…) : taille sobre */
+    /* Cartes métriques (Fournisseur suggéré, Dossier, Créé le…) : taille sobre */
     [data-testid="stMetricLabel"] {
         font-size: 12.5px !important; font-weight: 500 !important; color: #4A4A49 !important;
     }
@@ -2772,7 +2772,7 @@ with _link_col:
         st.link_button("📂 SharePoint", web_url, use_container_width=True)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Fournisseur deviné", meta["supplier_guess"])
+c1.metric("Fournisseur suggéré", meta["supplier_guess"])
 c2.metric("Dossier SharePoint", meta["folder_name"])
 c3.markdown(
     f'<div style="font-size:13px;color:#4A4A49;margin-bottom:6px">Statut</div>'
