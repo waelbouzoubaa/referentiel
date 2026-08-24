@@ -3153,22 +3153,14 @@ if _cached:
     _fm = _cached.get("file_metadata") or {}
     if _fm:
         _meta_parts = []
-        _rows_have_generic_code = any(
-            r.get("Article générique associé") for r in _cached.get("rows", [])
-        )
-        if _fm.get("ramery_generic_code"):
-            _meta_parts.append(f"**Code générique Ramery :** `{_fm['ramery_generic_code']}`")
-        elif _rows_have_generic_code:
-            _meta_parts.append("**Code générique Ramery :** _variable par produit (colonne dédiée — voir aperçu export ci-dessous)_")
-        else:
-            _meta_parts.append("**Code générique Ramery :** ⚠️ *non trouvé — vérifiez `columns.generic_code` ou `file_metadata.ramery_generic_code`*")
         if _fm.get("siren_fournisseur"):
             _meta_parts.append(f"**Numéro SIREN fournisseur :** `{_fm['siren_fournisseur']}`")
         if _fm.get("validity_start"):
             _meta_parts.append(f"**Validité :** {_fm['validity_start']} → {_fm.get('validity_end', '?')}")
         if _fm.get("contract_reference"):
             _meta_parts.append(f"**Réf. contrat :** {_fm['contract_reference']}")
-        st.info("  ·  ".join(_meta_parts))
+        if _meta_parts:
+            st.info("  ·  ".join(_meta_parts))
 
     if not _cached.get("export_enabled"):
         st.info("Export Gery désactivé pour ce fournisseur.")
