@@ -2738,12 +2738,23 @@ if not filtered:
     st.info(f"Aucune demande {libelle} pour le moment.")
     st.stop()
 
+def _sidebar_demande_label(supplier_guess: str, filename: str) -> str:
+    """Libellé de la sidebar : évite de répéter le fournisseur (le nom de
+    fichier commence souvent déjà par lui, ex: "Apok Tarif Isolant.xlsx")."""
+    supplier_label = supplier_guess.replace("_", " ").title()
+    stem = Path(filename).stem
+    rest = re.sub(rf"^{re.escape(supplier_label)}[\s_-]*", "", stem, flags=re.IGNORECASE).strip()
+    rest = rest or stem
+    if len(rest) > 32:
+        rest = rest[:32] + "…"
+    return f"{supplier_label}\n{rest}"
+
+
 selected_idx = st.sidebar.radio(
     "Demandes",
     options=range(len(filtered)),
-    format_func=lambda i: "{}\n{}".format(
-        filtered[i]["supplier_guess"].replace("_", " ").title(),
-        filtered[i]["filename"][:32] + "…" if len(filtered[i]["filename"]) > 32 else filtered[i]["filename"],
+    format_func=lambda i: _sidebar_demande_label(
+        filtered[i]["supplier_guess"], filtered[i]["filename"]
     ),
     key=f"demande_{statut}",
 )
