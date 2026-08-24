@@ -641,7 +641,7 @@ def render_table_form(
 
     price_export_mapping = gery_export.get("price_export_mapping") or {}
     direct_unit_cost = st.text_input(
-        "Type de prix utilisé pour 'Direct Unit Cost'",
+        "Type de prix utilisé pour 'Prix unitaire HT'",
         value=price_export_mapping.get("direct_unit_cost", "installer"),
         key=f"ge_direct_unit_cost_{pending_id}",
     )
@@ -938,7 +938,7 @@ def render_table_form_simple(
         st.caption("🔒 Résolu automatiquement à partir du code fournisseur — non modifiable ici.")
 
     _, code_col, _ = _source_field(
-        "Code article Frns *(obligatoire)*", "",
+        "Code article fournisseur *(obligatoire)*", "",
         pending_id, "supplier_product_code", [_SRC_COLUMN], columns,
         _SRC_COLUMN, (existing_columns.get("supplier_product_code") or {}).get("source_col") or "",
     )
@@ -1005,7 +1005,7 @@ def render_table_form_simple(
     )
     date_fmt = date_fmt or ve_date_fmt or "parse_date_fr"
 
-    with st.expander("Minimum Quantity", expanded=True):
+    with st.expander("Quantité minimale", expanded=True):
         st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
         min_qty = st.number_input(
             "Quantité minimum", min_value=1, step=1,
@@ -1027,7 +1027,7 @@ def render_table_form_simple(
         )
         return options[chosen]
 
-    with st.expander("Direct Unit Cost (obligatoire)", expanded=True):
+    with st.expander("Prix unitaire HT (obligatoire)", expanded=True):
         left, right = st.columns([1, 2])
         left.selectbox(
             "Source", [_SRC_COLUMN], index=0,
@@ -1047,7 +1047,7 @@ def render_table_form_simple(
         (_SRC_NONE, "")
     )
     siren_src, siren_val, _ = _source_field(
-        "SIREN Fournisseur", "",
+        "Numéro SIREN fournisseur", "",
         pending_id, "siren", [_SRC_CELL, _SRC_FIXED, _SRC_NONE], columns,
         siren_current[0], siren_current[1],
     )
@@ -1385,7 +1385,7 @@ def _render_gery_export(data: dict[str, Any], pending_id: str) -> dict[str, Any]
                            index=strategies.index(fs) if fs in strategies else 0,
                            key=f"ge_fs_{pending_id}")
     direct_unit_cost = st.text_input(
-        "Type de prix utilisé pour 'Direct Unit Cost'",
+        "Type de prix utilisé pour 'Prix unitaire HT'",
         value=(ge.get("price_export_mapping") or {}).get("direct_unit_cost", "installer"),
         key=f"ge_duc_{pending_id}",
     )
@@ -1574,7 +1574,7 @@ def render_matrix_form_simple(
     else:
         code_current = (_SRC_TEMPLATE, "{designation}")
     code_src, code_val, _ = _source_field(
-        "Code article Frns *(obligatoire)*",
+        "Code article fournisseur *(obligatoire)*",
         "Colonne directe, ou modèle calculé si le code n'existe pas tel quel dans le "
         "fichier (ex: {designation} | EP{epaisseur}).",
         pending_id, "mx_code", [_SRC_COLUMN, _SRC_TEMPLATE], detected_columns,
@@ -1762,11 +1762,11 @@ def render_matrix_form_simple(
         (_SRC_NONE, "")
     )
     siren_src, siren_val, _ = _source_field(
-        "SIREN Fournisseur", "", pending_id, "mx_siren", [_SRC_CELL, _SRC_FIXED, _SRC_NONE],
+        "Numéro SIREN fournisseur", "", pending_id, "mx_siren", [_SRC_CELL, _SRC_FIXED, _SRC_NONE],
         detected_columns, siren_current[0], siren_current[1],
     )
 
-    with st.expander("Minimum Quantity", expanded=True):
+    with st.expander("Quantité minimale", expanded=True):
         st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
         min_qty = st.number_input(
             "Quantité minimum", min_value=1, step=1,
@@ -3163,7 +3163,7 @@ if _cached:
         else:
             _meta_parts.append("**Code générique Ramery :** ⚠️ *non trouvé — vérifiez `columns.generic_code` ou `file_metadata.ramery_generic_code`*")
         if _fm.get("siren_fournisseur"):
-            _meta_parts.append(f"**SIREN Fournisseur :** `{_fm['siren_fournisseur']}`")
+            _meta_parts.append(f"**Numéro SIREN fournisseur :** `{_fm['siren_fournisseur']}`")
         if _fm.get("validity_start"):
             _meta_parts.append(f"**Validité :** {_fm['validity_start']} → {_fm.get('validity_end', '?')}")
         if _fm.get("contract_reference"):
