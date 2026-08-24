@@ -991,7 +991,7 @@ def render_table_form_simple(
     vs_current = (_SRC_CELL, (file_metadata.get("validity_start") or {}).get("cell") or "") \
         if file_metadata.get("validity_start") else (_SRC_NONE, "")
     vs_src, vs_val, date_fmt = _source_field(
-        "Starting Date (début de validité)", "",
+        "Date de début", "",
         pending_id, "validity_start", [_SRC_CELL, _SRC_NONE], columns,
         vs_current[0], vs_current[1], extra_render=_date_format_picker,
     )
@@ -999,7 +999,7 @@ def render_table_form_simple(
     ve_current = (_SRC_CELL, (file_metadata.get("validity_end") or {}).get("cell") or "") \
         if file_metadata.get("validity_end") else (_SRC_NONE, "")
     ve_src, ve_val, ve_date_fmt = _source_field(
-        "Ending Date (fin de validité)", "",
+        "Date de fin", "",
         pending_id, "validity_end", [_SRC_CELL, _SRC_NONE], columns,
         ve_current[0], ve_current[1], extra_render=_date_format_picker,
     )
@@ -1725,14 +1725,14 @@ def render_matrix_form_simple(
     vs_current = (_SRC_CELL, (file_metadata.get("validity_start") or {}).get("cell") or "") \
         if file_metadata.get("validity_start") else (_SRC_NONE, "")
     vs_src, vs_val, date_fmt = _source_field(
-        "Starting Date (début de validité)", "", pending_id, "mx_validity_start",
+        "Date de début", "", pending_id, "mx_validity_start",
         [_SRC_CELL, _SRC_NONE], detected_columns, vs_current[0], vs_current[1],
         extra_render=_date_format_picker,
     )
     ve_current = (_SRC_CELL, (file_metadata.get("validity_end") or {}).get("cell") or "") \
         if file_metadata.get("validity_end") else (_SRC_NONE, "")
     ve_src, ve_val, ve_date_fmt = _source_field(
-        "Ending Date (fin de validité)", "", pending_id, "mx_validity_end",
+        "Date de fin", "", pending_id, "mx_validity_end",
         [_SRC_CELL, _SRC_NONE], detected_columns, ve_current[0], ve_current[1],
         extra_render=_date_format_picker,
     )
