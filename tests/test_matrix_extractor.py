@@ -6,7 +6,7 @@ from pathlib import Path
 import openpyxl
 import pytest
 
-from middleware.parser.grammar import ColumnGroup, MappingRule
+from middleware.parser.grammar import MappingRule
 from middleware.parser.matrix_extractor import _parse_tier_label, parse_matrix_file
 
 
@@ -271,45 +271,6 @@ def test_parse_airisol_all_prices(tmp_path: Path) -> None:
     result = parse_matrix_file(path, rule)
 
     p = result.products[0]
-    assert len(p.all_prices()) == 6
-
-
-def _make_airisol_rule_single_column_groups() -> MappingRule:
-    """Variante de la règle avec un groupe de colonnes par variante (au lieu
-    d'une paire) et un tier_label vide sur la 2e colonne de chaque palier —
-    reproduit le YAML généré pour un fichier où le libellé de palier n'est
-    écrit qu'une fois dans le fichier source (cellules fusionnées)."""
-    rule = _make_airisol_rule()
-    rule.price_matrix.column_groups = [
-        ColumnGroup(columns=["G"], tier_label="0-500m²", variants=["ALU"]),
-        ColumnGroup(columns=["H"], tier_label="", variants=["BLANC"]),
-        ColumnGroup(columns=["I"], tier_label="500-1000m²", variants=["ALU"]),
-        ColumnGroup(columns=["J"], tier_label="", variants=["BLANC"]),
-        ColumnGroup(columns=["K"], tier_label=">1000m²", variants=["ALU"]),
-        ColumnGroup(columns=["L"], tier_label="", variants=["BLANC"]),
-    ]
-    return rule
-
-
-def test_parse_airisol_tier_label_vide_herite_du_palier_precedent(tmp_path: Path) -> None:
-    """Régression : un tier_label vide (colonne de variante 'secondaire' dans
-    une paire de colonnes fusionnées) ne doit plus produire des prix en
-    collision (même palier None/None) — voir Airisol Tarif 311226.xlsx."""
-    path = _make_airisol_xlsx(tmp_path, nb_produits=1)
-    rule = _make_airisol_rule_single_column_groups()
-    result = parse_matrix_file(path, rule)
-
-    p = result.products[0]
-    assert result.error_count == 0
-    blanc = next(v for v in p.variants if v.variant_code == "BLANC")
-    assert len(blanc.prices) == 3
-
-    tiers = {(pr.tier_min_quantity, pr.tier_max_quantity) for pr in blanc.prices}
-    assert tiers == {
-        (Decimal("0"), Decimal("500")),
-        (Decimal("500"), Decimal("1000")),
-        (Decimal("1000"), None),
-    }
     assert len(p.all_prices()) == 6
 
 

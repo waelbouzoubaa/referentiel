@@ -385,7 +385,7 @@ def _extract_variants(
 
 
 def _forward_fill_tier_labels(groups: list[ColumnGroup]) -> list[ColumnGroup]:
-    """Complète les `tier_label` vides avec le palier non-vide le plus proche.
+    """Complète les `tier_label` vides avec le dernier palier non-vide rencontré.
 
     Cas fréquent : le libellé de palier ("0-500m²") n'est écrit qu'une fois dans
     le fichier source, au-dessus d'une paire de colonnes fusionnées (une variante
@@ -393,27 +393,16 @@ def _forward_fill_tier_labels(groups: list[ColumnGroup]) -> list[ColumnGroup]:
     avec un tier_label vide dans le YAML. Sans ce correctif, tous les paliers
     vides d'un même produit finissent avec les mêmes bornes (None, None) en
     base, ce qui viole la contrainte d'unicité des prix (uq_prices_context).
-
-    Hérite d'abord du palier précédent (cas le plus courant : la variante vide
-    suit la colonne "de référence"), puis, si un groupe en tête de liste n'a
-    encore aucun palier précédent, du prochain palier non-vide trouvé plus loin.
     """
-    labels = [g.tier_label.strip() for g in groups]
-
-    last = ""
-    for i, label in enumerate(labels):
-        last = label or last
-        labels[i] = last
-
-    nxt = ""
-    for i in range(len(labels) - 1, -1, -1):
-        nxt = labels[i] or nxt
-        labels[i] = labels[i] or nxt
-
-    return [
-        g if g.tier_label == label else g.model_copy(update={"tier_label": label})
-        for g, label in zip(groups, labels, strict=True)
-    ]
+    filled: list[ColumnGroup] = []
+    last_label = ""
+    for group in groups:
+        label = group.tier_label.strip() or last_label
+        last_label = label or last_label
+        filled.append(
+            group if group.tier_label == label else group.model_copy(update={"tier_label": label})
+        )
+    return filled
 
 
 def _parse_tier_label(label: str) -> tuple[Decimal | None, Decimal | None, str | None]:
