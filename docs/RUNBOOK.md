@@ -127,7 +127,10 @@ Interface → barre latérale → **Vue : « Exports Gery »** → liste des CSV
 (ou sur le serveur : `docker compose exec api ls -lah /app/exports`)
 
 ### d) Renseigner les codes fournisseurs SAGE (placeholder)
-Éditer `config/sage_codes.csv` (format `code_fournisseur,code_sage`). Pris en compte au prochain export.
+Vide par défaut (colonne "Code Fournisseur SAGE" laissée vide à l'export tant que rien
+n'est renseigné — changement volontaire du 26/08/2026, ne plus y mettre de valeurs
+inventées). Pour renseigner un vrai code : éditer `config/sage_codes.csv` (format
+`code_fournisseur,code_sage`), pris en compte au prochain export.
 
 ---
 
