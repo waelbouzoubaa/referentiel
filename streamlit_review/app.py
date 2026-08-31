@@ -3194,9 +3194,22 @@ if action_col1.button(
     type="primary",
     key=f"approve_{pending_id}",
 ):
-    resp = api_get(f"/api/v1/review/{pending_id}/approve")
-    st.session_state["last_action_result"] = resp.json()
-    st.rerun()
+    # Sauvegarde d'abord le YAML tel qu'actuellement affiché à l'écran — évite
+    # de valider une version périmée si l'utilisateur a édité le YAML sans
+    # cliquer sur « Enregistrer le YAML » avant de cliquer ici.
+    _save_resp = api_put(
+        f"/api/v1/review/{pending_id}", {"yaml_content": st.session_state[yaml_content_key]}
+    )
+    if _save_resp.status_code == 422:
+        st.error("YAML invalide, correction nécessaire avant de valider :")
+        for _err in _save_resp.json().get("detail", []):
+            st.write(f"- {_err}")
+    elif _save_resp.status_code != 200:
+        st.error(f"Impossible d'enregistrer le YAML avant validation ({_save_resp.status_code}).")
+    else:
+        resp = api_get(f"/api/v1/review/{pending_id}/approve")
+        st.session_state["last_action_result"] = resp.json()
+        st.rerun()
 
 if meta["status"] == "needs_support":
     if action_col2.button("↩️ Remettre en attente métier", key=f"unescalate_{pending_id}"):
