@@ -13,5 +13,10 @@ SHAREPOINT_SITE_PATH = os.getenv("SHAREPOINT_SITE_PATH", "/")
 MIDDLEWARE_API_URL = os.getenv("MIDDLEWARE_API_URL", "http://api:8000")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))
 
+# Colonne SharePoint (choix Oui/Non) qui indique qu'un fichier est prêt à être traité.
+# Tant qu'elle vaut "Non" (ou est vide), le watcher ignore le fichier.
+TAG_COLUMN_NAME = os.getenv("TAG_COLUMN_NAME", "Export Gery")
+TAG_COLUMN_READY_VALUE = os.getenv("TAG_COLUMN_READY_VALUE", "Oui")
+
 # Dossier partagé entre le watcher et l'API (volume Docker)
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "/app/uploads")

@@ -37,3 +37,23 @@ def get_drive_id(site_id):
     resp.raise_for_status()
     drives = resp.json()["value"]
     return drives[0]["id"]
+
+
+def get_list_columns(drive_id):
+    """Colonnes de la bibliothèque de documents associée au drive."""
+    resp = requests.get(
+        f"{GRAPH_URL}/drives/{drive_id}/list/columns",
+        headers=get_headers()
+    )
+    resp.raise_for_status()
+    return resp.json()["value"]
+
+
+def get_item_fields(drive_id, item_id):
+    """Valeurs des colonnes personnalisées (metadata) d'un fichier SharePoint."""
+    resp = requests.get(
+        f"{GRAPH_URL}/drives/{drive_id}/items/{item_id}/listItem?$expand=fields",
+        headers=get_headers()
+    )
+    resp.raise_for_status()
+    return resp.json().get("fields", {})

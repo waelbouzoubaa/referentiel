@@ -4,8 +4,8 @@ import json
 import uuid
 import requests
 from pathlib import Path
-from sharepoint_client import get_headers, get_site_id, get_drive_id
-from config import POLL_INTERVAL, MIDDLEWARE_API_URL, UPLOADS_DIR
+from sharepoint_client import get_headers, get_site_id, get_drive_id, get_list_columns, get_item_fields
+from config import POLL_INTERVAL, MIDDLEWARE_API_URL, UPLOADS_DIR, TAG_COLUMN_NAME, TAG_COLUMN_READY_VALUE
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -16,6 +16,10 @@ FILE_CACHE_FILE = Path("file_cache.json")
 # Mapping dossier SharePoint (minuscules) → liste de {supplier_code, filename_keywords}
 # Mis à jour à chaque cycle de polling — voir _refresh_folder_mapping().
 _folder_to_suppliers: dict[str, list[dict]] = {}
+
+# Nom interne (côté Graph API) de la colonne TAG_COLUMN_NAME, résolu au démarrage
+# à partir de son nom affiché — voir _resolve_tag_field_name().
+_tag_field_internal_name: str | None = None
 
 
 def _folder_name_from_item(item) -> str:
@@ -36,6 +40,45 @@ def _refresh_folder_mapping():
     except Exception as exc:
         if not _folder_to_suppliers:
             print(f"  → Impossible de charger le mapping fournisseurs ({exc})")
+
+
+def _resolve_tag_field_name(drive_id):
+    """Trouve le nom interne de la colonne TAG_COLUMN_NAME (ex: "Exports Gery" → "ExportsGery")."""
+    global _tag_field_internal_name
+    try:
+        columns = get_list_columns(drive_id)
+        for col in columns:
+            if col.get("displayName", "").strip().lower() == TAG_COLUMN_NAME.strip().lower():
+                _tag_field_internal_name = col["name"]
+                print(f"Colonne de tag '{TAG_COLUMN_NAME}' trouvée (champ interne '{_tag_field_internal_name}').")
+                return
+        print(
+            f"  → ATTENTION : colonne '{TAG_COLUMN_NAME}' introuvable dans la bibliothèque "
+            f"SharePoint. Le filtre par tag est désactivé (tous les fichiers sont traités)."
+        )
+    except Exception as exc:
+        print(f"  → Impossible de résoudre la colonne de tag ({exc}). Le filtre par tag est désactivé.")
+
+
+def _is_tagged_ready(item) -> bool:
+    """True si le fichier porte TAG_COLUMN_NAME == TAG_COLUMN_READY_VALUE.
+
+    Si la colonne n'a pas pu être résolue (absente de la bibliothèque), le filtre
+    est désactivé et tout fichier est considéré comme prêt (comportement historique).
+    """
+    if _tag_field_internal_name is None:
+        return True
+
+    drive_id = item.get("parentReference", {}).get("driveId")
+    item_id = item["id"]
+    try:
+        fields = get_item_fields(drive_id, item_id)
+    except Exception as exc:
+        print(f"  → Impossible de lire le tag ({exc}) — fichier ignoré par prudence.")
+        return False
+
+    value = fields.get(_tag_field_internal_name)
+    return str(value).strip().lower() == TAG_COLUMN_READY_VALUE.strip().lower()
 
 
 def load_state(drive_id):
@@ -121,6 +164,10 @@ def _trigger_middleware(item):
 
     if not name.lower().endswith((".xlsx", ".xls")):
         print(f"  → Ignoré (pas un fichier Excel) : {name}")
+        return
+
+    if not _is_tagged_ready(item):
+        print(f"  → Ignoré (colonne '{TAG_COLUMN_NAME}' ≠ '{TAG_COLUMN_READY_VALUE}') : {name}")
         return
 
     supplier_code = _resolve_supplier_code(item)
@@ -292,7 +339,11 @@ def run():
         print("Premier scan complet...")
         delta_link = f"{GRAPH_URL}/drives/{drive_id}/root/delta"
 
+    _resolve_tag_field_name(drive_id)
+
     while True:
+        if _tag_field_internal_name is None:
+            _resolve_tag_field_name(drive_id)
         _refresh_folder_mapping()
         print(f"\nPolling delta...")
         items, new_delta_link = fetch_delta(delta_link)
