@@ -208,9 +208,13 @@ def _trigger_middleware(item):
         )
         resp.raise_for_status()
         data = resp.json()
-        print(f"  → Envoyé pour validation métier (ID: {data.get('pending_id')})")
-        for issue in data.get("pending_issues", []):
-            print(f"     ! {issue}")
+        if data.get("auto_approved"):
+            files = ", ".join(f["path"] for f in data.get("files", []))
+            print(f"  → Export automatique (prix seuls modifiés, déjà validé) : {files}")
+        else:
+            print(f"  → Envoyé pour validation métier (ID: {data.get('pending_id')})")
+            for issue in data.get("pending_issues", []):
+                print(f"     ! {issue}")
     except requests.HTTPError as exc:
         print(f"  → Erreur HTTP {exc.response.status_code} : {exc.response.text[:300]}")
     except requests.ConnectionError:

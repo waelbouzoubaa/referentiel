@@ -5,10 +5,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.api.schemas import (
     DeltaSummary,
+    GeneratedFileOut,
     GenerateExportsRequest,
     GenerateExportsResponse,
     ProcessFileRequest,
@@ -16,13 +19,17 @@ from middleware.api.schemas import (
 )
 from middleware.core.exceptions import ParsingError
 from middleware.core.logging import get_logger
+from middleware.db.models import Supplier
+from middleware.db.session import get_session
+from middleware.db.writer import get_known_hashes
 from middleware.delta.engine import compute_delta
 from middleware.parser.grammar import MappingRule
 from middleware.parser.pivot import ParsingResult
 from middleware.parser.yaml_loader import load_all_mappings
-from middleware.pipeline import parse_with_rule
+from middleware.pipeline import parse_with_rule, process_and_export
 
 PENDING_DIR = Path("/app/uploads/pending")
+EXPORTS_DIR = Path("/app/exports")
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -91,13 +98,18 @@ async def process_file(request: ProcessFileRequest) -> ProcessFileResponse:
 @router.post("/generate-gery-exports", response_model=GenerateExportsResponse, tags=["exports"])
 async def generate_gery_exports_endpoint(
     request: GenerateExportsRequest,
+    session: AsyncSession = Depends(get_session),
 ) -> GenerateExportsResponse:
-    """Reçoit un fichier d'un fournisseur connu et crée une demande de validation.
+    """Reçoit un fichier d'un fournisseur connu et l'exporte, ou crée une demande de validation.
 
-    Tout fichier — connu ou non — passe désormais par une validation métier avant
-    export : le YAML connu est proposé comme suggestion (confiance haute), mais
-    l'export réel (DB + CSV Gery) n'est déclenché qu'à l'approbation dans l'UI
-    (voir /review/{id}/approve). Un contrôle de cohérence signale en plus les
+    Un fichier déjà validé au moins une fois (produits déjà en base pour ce
+    fournisseur) qui ne fait que changer des prix — aucun produit ajouté/retiré,
+    aucun champ métier modifié, seul le prix bouge — est exporté directement,
+    sans repasser par la validation métier (voir `_try_auto_export`). Dans tous
+    les autres cas (premier fichier d'un fournisseur, produits ajoutés/retirés,
+    champ métier changé, ou souci de cohérence détecté), le YAML connu est
+    proposé comme suggestion mais reste soumis à validation humaine avant export
+    (voir /review/{id}/approve) — un contrôle de cohérence signale en plus les
     fichiers qui ne correspondent visiblement plus au YAML connu (0 produit, 0
     prix, trop d'erreurs) — confiance réduite, alerte affichée dans l'UI.
     """
@@ -132,6 +144,11 @@ async def generate_gery_exports_endpoint(
     parse_result = _parse_with_rule(path, rule)
     issues = _check_coherence(parse_result, rule)
 
+    if not issues:
+        auto_response = await _try_auto_export(session, request, path, rule, parse_result)
+        if auto_response is not None:
+            return auto_response
+
     pending_id = _create_pending_review(request, path, rule, issues)
     logger.info(
         "fichier d'un fournisseur connu routé vers validation métier",
@@ -152,6 +169,88 @@ async def generate_gery_exports_endpoint(
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+async def _try_auto_export(
+    session: AsyncSession,
+    request: GenerateExportsRequest,
+    path: Path,
+    rule: MappingRule,
+    parse_result: ParsingResult,
+) -> GenerateExportsResponse | None:
+    """Exporte directement si ce fichier ne fait que mettre à jour des prix connus.
+
+    Ne s'applique que si le fournisseur a déjà des produits en base (donc déjà
+    validé au moins une fois) ET que le delta contre l'état connu ne contient
+    QUE des PRICE_CHANGE/REACTIVATE/inchangés — aucun produit ajouté, retiré, ou
+    modifié sur un champ métier (désignation, etc.), ce qui indiquerait un vrai
+    changement de structure à faire relire par un humain. Retourne None si les
+    conditions ne sont pas réunies (le flux normal de validation métier prend
+    le relais), jamais une exception — l'auto-export est un raccourci, pas un
+    chemin critique.
+    """
+    supplier = (
+        await session.execute(select(Supplier).where(Supplier.code == rule.supplier_code))
+    ).scalar_one_or_none()
+    if supplier is None:
+        return None  # jamais traité — première fois, passe par la validation métier
+
+    incoming_codes = {p.supplier_product_code for p in parse_result.products}
+    known_hashes, known_hashes_no_prices, deleted_codes = await get_known_hashes(
+        session, supplier.id, rule.upload_mode, incoming_codes
+    )
+    if not known_hashes:
+        return None  # rien en base pour ce fournisseur — pas de baseline à comparer
+
+    delta = compute_delta(
+        parse_result.products,
+        known_hashes=known_hashes,
+        known_hashes_no_prices=known_hashes_no_prices,
+        deleted_codes=deleted_codes,
+    )
+    if delta.creates or delta.updates or delta.deletes:
+        return None  # changement structurel (produit ajouté/retiré/modifié) → validation métier
+
+    try:
+        _, _, export_result = await process_and_export(
+            session,
+            rule,
+            path,
+            EXPORTS_DIR,
+            original_filename=request.original_filename or path.name,
+            sharepoint_item_id=request.sharepoint_item_id,
+        )
+    except Exception as exc:
+        await session.rollback()
+        logger.warning(
+            "export automatique échoué — bascule sur la validation métier",
+            supplier_code=rule.supplier_code,
+            fichier=path.name,
+            erreur=str(exc),
+        )
+        return None
+
+    logger.info(
+        "export automatique — fichier déjà validé, seuls des prix ont changé",
+        supplier_code=rule.supplier_code,
+        fichier=path.name,
+        price_changes=len(delta.price_changes),
+        reactivates=len(delta.reactivates),
+        unchanged=delta.unchanged,
+    )
+    return GenerateExportsResponse(
+        supplier_code=rule.supplier_code,
+        files=[
+            GeneratedFileOut(
+                kind=f.kind, path=str(f.path), line_count=f.line_count, output_hash=f.output_hash
+            )
+            for f in export_result.files
+        ],
+        generated_at=datetime.utcnow(),
+        pending_id=None,
+        pending_issues=[],
+        auto_approved=True,
+    )
+
 
 def _check_coherence(result: ParsingResult, rule: MappingRule) -> list[str]:
     """Vérifie que le parsing est cohérent. Retourne les problèmes détectés (vide = OK)."""

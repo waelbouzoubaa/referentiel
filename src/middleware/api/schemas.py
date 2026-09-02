@@ -104,8 +104,9 @@ class GenerateExportsResponse(BaseModel):
     supplier_code: str
     files: list[GeneratedFileOut] = []
     generated_at: datetime
-    pending_id: str
+    pending_id: str | None = None
     pending_issues: list[str] = []
+    auto_approved: bool = False
 
 
 # ─── Audit ────────────────────────────────────────────────────────────────────
