@@ -5,13 +5,15 @@ import uuid
 import requests
 from pathlib import Path
 from sharepoint_client import get_headers, get_site_id, get_drive_id, get_list_columns, get_item_fields
-from config import POLL_INTERVAL, MIDDLEWARE_API_URL, UPLOADS_DIR, TAG_COLUMN_NAME, TAG_COLUMN_READY_VALUE
+from config import POLL_INTERVAL, MIDDLEWARE_API_URL, UPLOADS_DIR, STATE_DIR, TAG_COLUMN_NAME, TAG_COLUMN_READY_VALUE
 
 sys.stdout.reconfigure(encoding="utf-8")
 
 GRAPH_URL = "https://graph.microsoft.com/v1.0"
-DELTA_TOKEN_FILE = Path("delta_token.json")
-FILE_CACHE_FILE = Path("file_cache.json")
+_state_dir = Path(STATE_DIR)
+_state_dir.mkdir(parents=True, exist_ok=True)
+DELTA_TOKEN_FILE = _state_dir / "delta_token.json"
+FILE_CACHE_FILE = _state_dir / "file_cache.json"
 
 # Mapping dossier SharePoint (minuscules) → liste de {supplier_code, filename_keywords}
 # Mis à jour à chaque cycle de polling — voir _refresh_folder_mapping().

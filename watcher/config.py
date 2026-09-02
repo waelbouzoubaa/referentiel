@@ -20,3 +20,7 @@ TAG_COLUMN_READY_VALUE = os.getenv("TAG_COLUMN_READY_VALUE", "Oui")
 
 # Dossier partagé entre le watcher et l'API (volume Docker)
 UPLOADS_DIR = os.getenv("UPLOADS_DIR", "/app/uploads")
+
+# Dossier dédié à l'état persistant du watcher (delta_token.json, file_cache.json) —
+# volume Docker séparé (`watcher_state`), survit aux rebuilds du conteneur.
+STATE_DIR = os.getenv("STATE_DIR", "/app/state")
