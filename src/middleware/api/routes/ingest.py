@@ -34,6 +34,22 @@ class UnknownIngestResponse(BaseModel):
     message: str
 
 
+def _inject_supplier_code(yaml_content: str, supplier_code: str) -> str:
+    """Remplace supplier_code dans un YAML repris d'un autre fournisseur (structure match).
+
+    Indispensable : sans ça, approuver la suggestion réécrirait le fichier YAML du
+    fournisseur d'origine (même supplier_code → même chemin config/suppliers/{code}_v1.yaml).
+    """
+    import re
+    return re.sub(
+        r'^supplier_code:.*$',
+        f'supplier_code: "{supplier_code}"',
+        yaml_content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+
 def _inject_sharepoint_folder(yaml_content: str, folder_name: str) -> str:
     """Corrige sharepoint_folder dans le YAML généré avec le vrai dossier SharePoint source."""
     import re
@@ -104,16 +120,88 @@ def _find_pending_for_file(
     return None
 
 
+def _apply_pending_suggestion(
+    pending_id: str,
+    *,
+    yaml_proposed: str,
+    supplier_guess: str,
+    confidence: int,
+    confidence_source: str,
+    initial_prompt: str = "",
+) -> bool:
+    """Écrit une suggestion (structure connue ou IA) dans le pending JSON.
+
+    Retourne False sans rien écrire si la demande a disparu ou a déjà été
+    traitée entre-temps (ne jamais écraser une action utilisateur concurrente).
+    """
+    meta_path = PENDING_DIR / f"{pending_id}.json"
+    if not meta_path.exists():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if meta.get("status") != "pending":
+        return False
+
+    meta["yaml_proposed"] = yaml_proposed
+    meta["initial_prompt"] = initial_prompt
+    meta["confidence"] = confidence
+    meta["confidence_source"] = confidence_source
+    meta["supplier_guess"] = supplier_guess
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return True
+
+
 def _generate_ai_suggestion_background(
     pending_id: str, file_path: Path, folder_name: str, filename: str
 ) -> None:
-    """Tâche de fond : génère la suggestion IA et met à jour le pending JSON.
+    """Tâche de fond : propose un mapping pour ce fichier et met à jour le pending JSON.
 
-    Tourne APRÈS que la réponse HTTP soit déjà repartie vers le watcher — l'appel
-    Gemini (jusqu'à 1-2 min) ne bloque donc jamais le reste de l'API (interface,
-    autres requêtes). Best-effort : si ça échoue, la demande reste avec un YAML
-    vide (le bouton « Générer avec l'IA » de l'interface reste disponible).
+    Tourne APRÈS que la réponse HTTP soit déjà repartie vers le watcher — un appel
+    Gemini éventuel (jusqu'à 1-2 min) ne bloque donc jamais le reste de l'API
+    (interface, autres requêtes). Best-effort : si tout échoue, la demande reste
+    avec un YAML vide (le bouton « Générer avec l'IA » de l'interface reste
+    disponible).
+
+    Essaie d'abord une correspondance de structure EXACTE avec un fournisseur déjà
+    validé (mêmes libellés de colonnes, à la même position — voir structure_index.py)
+    — si trouvée, reprend directement son YAML (rapide, gratuit, déterministe) au lieu
+    d'appeler l'IA. Sinon, comportement inchangé : génération IA fraîche.
     """
+    from middleware.structure_index import find_matching_supplier
+
+    try:
+        matched_code = find_matching_supplier(file_path)
+    except Exception as exc:
+        logger.warning(
+            "recherche de structure connue échouée (ignorée)",
+            pending_id=pending_id, erreur=str(exc),
+        )
+        matched_code = None
+
+    if matched_code is not None:
+        yaml_path = Path("config/suppliers") / f"{matched_code}_v1.yaml"
+        if yaml_path.exists():
+            supplier_guess = folder_name.lower().replace(" ", "_").replace("-", "_")
+            yaml_proposed = yaml_path.read_text(encoding="utf-8")
+            yaml_proposed = _inject_supplier_code(yaml_proposed, supplier_guess)
+            yaml_proposed = _inject_sharepoint_folder(yaml_proposed, folder_name)
+            ok = _apply_pending_suggestion(
+                pending_id,
+                yaml_proposed=yaml_proposed,
+                supplier_guess=supplier_guess,
+                confidence=95,
+                confidence_source="structure_match",
+            )
+            if ok:
+                logger.info(
+                    "structure déjà connue — YAML repris sans appel IA",
+                    pending_id=pending_id, matched_supplier=matched_code,
+                    supplier_guess=supplier_guess,
+                )
+            return
+
     try:
         from middleware.ai.yaml_generator import generate_yaml_from_excel
 
@@ -130,26 +218,18 @@ def _generate_ai_suggestion_background(
         )
         return
 
-    meta_path = PENDING_DIR / f"{pending_id}.json"
-    if not meta_path.exists():
-        return
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    if meta.get("status") != "pending":
-        # La demande a déjà été traitée/modifiée entre-temps — ne pas écraser.
-        return
-
-    meta["yaml_proposed"] = yaml_proposed
-    meta["initial_prompt"] = prompt
-    meta["confidence"] = confidence
-    meta["confidence_source"] = "ai_generated"
-    meta["supplier_guess"] = supplier_guess
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info(
-        "suggestion IA (tâche de fond) prête", pending_id=pending_id, confidence=confidence
+    ok = _apply_pending_suggestion(
+        pending_id,
+        yaml_proposed=yaml_proposed,
+        supplier_guess=supplier_guess,
+        confidence=confidence,
+        confidence_source="ai_generated",
+        initial_prompt=prompt,
     )
+    if ok:
+        logger.info(
+            "suggestion IA (tâche de fond) prête", pending_id=pending_id, confidence=confidence
+        )
 
 
 @router.post("/ingest/unknown", response_model=UnknownIngestResponse, tags=["ingestion"])

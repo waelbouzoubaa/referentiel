@@ -432,6 +432,10 @@ async def approve_pending(
     logger.info("yaml approuvé sauvegardé", path=str(yaml_path))
 
     file_path = Path(meta.get("file_path", ""))
+    if file_path.exists():
+        from middleware.structure_index import update_fingerprint
+        update_fingerprint(supplier_code, file_path, rule)
+
     if not file_path.exists():
         return ApproveResult(
             kind="file_missing",

@@ -156,6 +156,19 @@ def col_letter_to_idx(col: str) -> int:
     return result - 1
 
 
+def idx_to_col_letter(idx: int) -> str:
+    """Convertit un index de colonne 0-based en lettre Excel (inverse de col_letter_to_idx).
+
+    Exemples : 0 → A | 1 → B | 25 → Z | 26 → AA
+    """
+    idx += 1
+    letters = ""
+    while idx > 0:
+        idx, rem = divmod(idx - 1, 26)
+        letters = chr(ord("A") + rem) + letters
+    return letters
+
+
 def cell_ref_to_row_col(cell_ref: str) -> tuple[int, int]:
     """Convertit une référence de cellule en (row_0based, col_0based).
 
