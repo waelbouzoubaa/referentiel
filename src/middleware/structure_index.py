@@ -23,7 +23,7 @@ from pathlib import Path
 from middleware.core.logging import get_logger
 from middleware.parser.excel_reader import find_sheet, read_workbook
 from middleware.parser.grammar import MappingRule
-from middleware.parser.pivot import FileMetadataPivot
+from middleware.parser.pivot import FileMetadataPivot, ProductPivot
 from middleware.parser.transforms import idx_to_col_letter
 
 logger = get_logger(__name__)
@@ -108,20 +108,39 @@ def _file_metadata_present(file_metadata: FileMetadataPivot) -> list[str]:
     )
 
 
+def _generic_code_pattern(products: list[ProductPivot]) -> str:
+    """Classe le motif du code générique par produit (colonne `columns.generic_code`,
+    PAS le cartouche file_metadata.ramery_generic_code — voir verify_file_metadata_presence
+    pour celui-là) :
+    - "none" : aucun produit n'a de code générique (colonne absente ou vide partout).
+    - "constant" : même valeur non vide sur toutes les lignes qui en ont une (normal —
+      un seul code générique appliqué à tout un lot, cas fréquent).
+    - "varying" : au moins deux valeurs différentes selon la ligne (vraie colonne
+      par-produit, distinctive).
+    """
+    values = {p.generic_code for p in products if _has_value(p.generic_code)}
+    if not values:
+        return "none"
+    return "constant" if len(values) == 1 else "varying"
+
+
 def update_fingerprint(
     supplier_code: str,
     file_path: Path,
     rule: MappingRule,
     file_metadata: FileMetadataPivot | None = None,
+    products: list[ProductPivot] | None = None,
 ) -> None:
     """Recalcule et enregistre l'empreinte structurelle d'un fournisseur tout juste approuvé.
 
     `file_metadata` : résultat de parsing déjà produit par l'appelant (évite un
     second parsing) — sert à mémoriser quels champs de cartouche (SIREN, dates,
     code générique...) s'extraient sur ce fichier, pour l'auto-validation future
-    (voir verify_file_metadata_presence). Optionnel : si absent, aucun champ
-    n'est exigé pour les futurs matches sur cette structure (comportement
-    identique à avant cette vérification).
+    (voir verify_file_metadata_presence). `products` : idem, sert à mémoriser le
+    motif du code générique PAR PRODUIT (voir verify_generic_code_pattern) —
+    distinct du cartouche, mode table uniquement (colonne `columns.generic_code`).
+    Les deux sont optionnels : si absents, rien n'est exigé pour les futurs
+    matches sur cette structure (comportement identique à avant ces vérifications).
 
     Best-effort : une erreur ici est journalisée mais ne remonte jamais — ce n'est
     qu'un raccourci pour les prochains fichiers, pas une étape critique.
@@ -135,6 +154,9 @@ def update_fingerprint(
             "header": signature,
             "file_metadata_present": (
                 _file_metadata_present(file_metadata) if file_metadata is not None else []
+            ),
+            "generic_code_pattern": (
+                _generic_code_pattern(products) if products is not None else None
             ),
         }
         _save_index(index)
@@ -199,6 +221,23 @@ def verify_file_metadata_presence(supplier_code: str, file_metadata: FileMetadat
         return True
     present = set(_file_metadata_present(file_metadata))
     return all(field in present for field in expected)
+
+
+def verify_generic_code_pattern(supplier_code: str, products: list[ProductPivot]) -> bool:
+    """True si le motif du code générique par produit (aucun / même partout / différent
+    par ligne — voir _generic_code_pattern) est identique à celui du fournisseur matché.
+
+    Détecte le cas où la colonne code générique a changé de nature entre les deux
+    fichiers (ex: vraie colonne par-produit dans le fichier d'origine, mais colonne
+    vide ou constante dans le nouveau — signe que la colonne a bougé ou ne correspond
+    plus). Ne compare jamais les valeurs elles-mêmes (un code différent d'un fichier à
+    l'autre, à motif égal, est normal) — uniquement la classe de motif.
+    """
+    entry = _load_index().get(supplier_code)
+    expected = entry.get("generic_code_pattern") if isinstance(entry, dict) else None
+    if expected is None:
+        return True  # jamais enregistré (ancien format, ou fournisseur sans colonne code générique)
+    return _generic_code_pattern(products) == expected
 
 
 def _parse_row_range(rows_spec: str) -> tuple[int, int]:

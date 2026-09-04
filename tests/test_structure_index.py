@@ -7,7 +7,7 @@ import openpyxl
 import pytest
 
 from middleware.parser.grammar import HeaderDetection, MappingRule
-from middleware.parser.pivot import FileMetadataPivot
+from middleware.parser.pivot import FileMetadataPivot, ProductPivot
 from middleware.structure_index import (
     build_auto_validated_rule,
     extract_header_signature,
@@ -15,6 +15,7 @@ from middleware.structure_index import (
     get_expected_file_metadata_fields,
     update_fingerprint,
     verify_file_metadata_presence,
+    verify_generic_code_pattern,
 )
 
 _HEADERS = {"B": "Code article", "C": "Désignation", "D": "Prix"}
@@ -168,6 +169,57 @@ def test_verify_file_metadata_presence_aucun_champ_attendu(tmp_path: Path) -> No
 
     assert get_expected_file_metadata_fields("atlantic_scga_chauffage") == []
     assert verify_file_metadata_presence("atlantic_scga_chauffage", FileMetadataPivot()) is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Motif du code générique par produit (colonne, pas cartouche)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _products(codes: list[str | None]) -> list[ProductPivot]:
+    return [
+        ProductPivot(
+            supplier_code="x", supplier_product_code=f"P{i}", designation=f"Produit {i}",
+            generic_code=code,
+        )
+        for i, code in enumerate(codes)
+    ]
+
+
+def test_verify_generic_code_pattern_varying_vs_none(tmp_path: Path) -> None:
+    """Motif d'origine 'varying' (vrai code par produit) : un nouveau fichier sans
+    aucun code générique (colonne vide/décalée) doit être rejeté."""
+    rule = _rule(row=9)
+    original = _make_file(tmp_path, "original.xlsx", 9, _HEADERS)
+    varying = _products(["A1", "A2", "A3"])
+    update_fingerprint("atlantic_scga_chauffage", original, rule, products=varying)
+
+    code = "atlantic_scga_chauffage"
+    assert verify_generic_code_pattern(code, _products(["B1", "B2"])) is True
+    assert verify_generic_code_pattern(code, _products([None, None])) is False
+    assert verify_generic_code_pattern(code, _products(["C", "C", "C"])) is False
+
+
+def test_verify_generic_code_pattern_constant_valeur_differente_ok(tmp_path: Path) -> None:
+    """Motif d'origine 'constant' : une valeur DIFFÉRENTE mais toujours constante
+    dans le nouveau fichier est normale (autre lot, même principe)."""
+    rule = _rule(row=9)
+    original = _make_file(tmp_path, "original.xlsx", 9, _HEADERS)
+    update_fingerprint(
+        "atlantic_scga_chauffage", original, rule, products=_products(["1750", "1750"]),
+    )
+
+    code = "atlantic_scga_chauffage"
+    assert verify_generic_code_pattern(code, _products(["9999", "9999"])) is True
+    assert verify_generic_code_pattern(code, _products(["A", "B"])) is False
+
+
+def test_verify_generic_code_pattern_aucune_attente_enregistree(tmp_path: Path) -> None:
+    """Sans `products` fourni à update_fingerprint, rien n'est exigé (rétro-compat)."""
+    rule = _rule(row=9)
+    original = _make_file(tmp_path, "original.xlsx", 9, _HEADERS)
+    update_fingerprint("atlantic_scga_chauffage", original, rule)  # pas de products
+
+    assert verify_generic_code_pattern("atlantic_scga_chauffage", _products(["X", "Y"])) is True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -256,6 +256,7 @@ async def _try_full_auto_validation(
         build_auto_validated_rule,
         update_fingerprint,
         verify_file_metadata_presence,
+        verify_generic_code_pattern,
     )
 
     rule = build_auto_validated_rule(matched_code, file_path, matched_row)
@@ -284,6 +285,12 @@ async def _try_full_auto_validation(
             pending_id=pending_id, matched_supplier=matched_code,
         )
         return False
+    if not verify_generic_code_pattern(matched_code, result.products):
+        logger.info(
+            "motif du code générique différent du fournisseur matché — repli validation humaine",
+            pending_id=pending_id, matched_supplier=matched_code,
+        )
+        return False
 
     try:
         async with AsyncSessionLocal() as session:
@@ -308,7 +315,9 @@ async def _try_full_auto_validation(
     CONFIG_DIR = Path("config/suppliers")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     (CONFIG_DIR / f"{supplier_guess}_v1.yaml").write_text(yaml_text, encoding="utf-8")
-    update_fingerprint(supplier_guess, file_path, rule, parse_result.file_metadata)
+    update_fingerprint(
+        supplier_guess, file_path, rule, parse_result.file_metadata, parse_result.products,
+    )
 
     meta_path = PENDING_DIR / f"{pending_id}.json"
     try:

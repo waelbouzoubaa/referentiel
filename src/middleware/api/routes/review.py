@@ -464,7 +464,9 @@ async def approve_pending(
         )
 
     from middleware.structure_index import update_fingerprint
-    update_fingerprint(supplier_code, file_path, rule, parse_result.file_metadata)
+    update_fingerprint(
+        supplier_code, file_path, rule, parse_result.file_metadata, parse_result.products,
+    )
 
     exports = [f.path.name for f in export_result.files]
 
