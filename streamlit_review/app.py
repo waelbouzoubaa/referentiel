@@ -359,6 +359,72 @@ def render_exports_view() -> None:
                         st.rerun()
 
 
+def render_dashboard_view() -> None:
+    """Tableau de bord : compteurs par statut et par mode de validation, plus la
+    liste des structures reconnues (voir middleware.structure_index)."""
+    st.subheader("📊 Tableau de bord")
+    st.caption("Vue d'ensemble des demandes de validation et de la reconnaissance de structure.")
+
+    try:
+        pending_items = fetch_pending_list()
+    except Exception as exc:
+        st.error(f"Impossible de contacter l'API ({API_URL}) : {exc}")
+        return
+
+    try:
+        struct_resp = api_get("/suppliers/structure-index")
+        struct_data = struct_resp.json() if struct_resp.status_code == 200 else {"count": 0, "suppliers": []}
+    except Exception:
+        struct_data = {"count": 0, "suppliers": []}
+
+    total = len(pending_items)
+    par_statut = {"pending": 0, "approved": 0, "needs_support": 0}
+    approuves_auto = 0
+    par_source = {"structure_match_auto": 0, "structure_match": 0, "ai_generated": 0, "known_yaml": 0}
+    for it in pending_items:
+        par_statut[it["status"]] = par_statut.get(it["status"], 0) + 1
+        source = it.get("confidence_source")
+        if source in par_source:
+            par_source[source] += 1
+        if it["status"] == "approved" and source == "structure_match_auto":
+            approuves_auto += 1
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Fichiers traités", total)
+    c2.metric("En attente", par_statut["pending"])
+    c3.metric("🆘 Aide support", par_statut["needs_support"])
+    c4.metric("Structures connues", struct_data.get("count", 0))
+
+    c5, c6, c7 = st.columns(3)
+    c5.metric("✅ Validés", par_statut["approved"])
+    c6.metric("↳ dont auto (0 clic)", approuves_auto)
+    c7.metric("↳ dont validés à la main", par_statut["approved"] - approuves_auto)
+
+    st.markdown("##### Origine des suggestions")
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("🔍 Structure → auto", par_source["structure_match_auto"])
+    o2.metric("🔍 Structure → suggérée", par_source["structure_match"])
+    o3.metric("🤖 IA fraîche", par_source["ai_generated"])
+    o4.metric("📄 YAML connu", par_source["known_yaml"])
+
+    st.divider()
+    st.markdown("##### Structures reconnues (sans appel IA)")
+    suppliers = struct_data.get("suppliers", [])
+    if not suppliers:
+        st.info("Aucune structure enregistrée pour l'instant — s'enregistre à chaque approbation.")
+    else:
+        h1, h2, h3 = st.columns([3, 2, 4])
+        h1.markdown("**Fournisseur**")
+        h2.markdown("**Colonnes d'en-tête**")
+        h3.markdown("**Cartouche vérifié**")
+        for s in suppliers:
+            r1, r2, r3 = st.columns([3, 2, 4])
+            r1.write(s["supplier_code"])
+            r2.write(str(s["header_column_count"]))
+            fields = s.get("file_metadata_fields") or []
+            r3.write(", ".join(fields) if fields else "—")
+
+
 # ─── Helpers YAML ───────────────────────────────────────────────────────────
 
 def load_yaml(text: str) -> dict[str, Any]:
@@ -2692,12 +2758,15 @@ FORM_RENDERERS = {
 
 render_sidebar_header()
 
-_vue_options = ["Validation des correspondances", "Exportations Gery"]
+_vue_options = ["Validation des correspondances", "Exportations Gery", "📊 Tableau de bord"]
 if SHOW_HELP_VIEW:
     _vue_options.append("❓ Aide")
 vue = st.sidebar.radio("Vue", _vue_options)
 if vue == "Exportations Gery":
     render_exports_view()
+    st.stop()
+if vue == "📊 Tableau de bord":
+    render_dashboard_view()
     st.stop()
 if vue == "❓ Aide":
     render_help_view()

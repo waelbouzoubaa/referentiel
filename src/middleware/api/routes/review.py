@@ -123,6 +123,7 @@ def list_pending() -> list[dict]:
                 "status": data["status"],
                 "created_at": data["created_at"],
                 "confidence": data.get("confidence"),
+                "confidence_source": data.get("confidence_source"),
             })
         except Exception:
             continue

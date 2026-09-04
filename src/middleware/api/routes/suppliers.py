@@ -52,6 +52,30 @@ async def folder_mapping() -> dict[str, list[dict]]:
 
 
 @router.get(
+    "/structure-index",
+    summary="Résumé du registre des empreintes structurelles (reconnaissance de structure)",
+)
+async def structure_index_summary() -> dict:
+    """Liste les fournisseurs dont la structure d'en-tête est enregistrée pour la
+    reconnaissance sans IA — voir middleware.structure_index. Best-effort : un
+    registre absent/illisible retourne une liste vide plutôt qu'une erreur.
+    """
+    from middleware.structure_index import INDEX_FILE, _load_index
+
+    index = _load_index()
+    suppliers = []
+    for code, entry in sorted(index.items()):
+        header = entry.get("header") if isinstance(entry, dict) else entry
+        metadata_fields = entry.get("file_metadata_present", []) if isinstance(entry, dict) else []
+        suppliers.append({
+            "supplier_code": code,
+            "header_column_count": len(header) if header else 0,
+            "file_metadata_fields": metadata_fields,
+        })
+    return {"count": len(suppliers), "suppliers": suppliers, "index_file_exists": INDEX_FILE.exists()}
+
+
+@router.get(
     "/{supplier_code}/yaml",
     summary="Retourne le contenu YAML d'un fournisseur",
 )
