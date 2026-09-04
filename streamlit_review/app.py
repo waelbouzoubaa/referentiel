@@ -7,6 +7,7 @@ valider (génère les exports Gery) ou de rejeter la proposition.
 from __future__ import annotations
 
 import base64
+import html
 import io
 import os
 import re
@@ -148,6 +149,59 @@ st.markdown(
     }
 
     hr { border-color: #E3E8EE; }
+
+    /* ── Tableau de bord ─────────────────────────────────────────────────── */
+    .dash-kpi {
+        background: #F7F9FC; border: 1px solid #E3E8EE; border-radius: 12px;
+        padding: 18px 16px; text-align: center; height: 100%;
+    }
+    .dash-kpi .dash-kpi-icon { font-size: 20px; margin-bottom: 4px; }
+    .dash-kpi .dash-kpi-value { font-size: 32px; font-weight: 700; color: #003D7C; line-height: 1.1; }
+    .dash-kpi .dash-kpi-label {
+        font-size: 12.5px; font-weight: 500; color: #4A4A49; margin-top: 6px;
+    }
+    .dash-kpi.dash-accent-ok .dash-kpi-value { color: #00695C; }
+    .dash-kpi.dash-accent-wait .dash-kpi-value { color: #003D7C; }
+    .dash-kpi.dash-accent-support .dash-kpi-value { color: #8A5A00; }
+
+    .dash-card {
+        background: #FFFFFF; border: 1px solid #E3E8EE; border-radius: 12px;
+        padding: 20px 22px; margin-bottom: 18px;
+    }
+    .dash-card-title {
+        font-size: 14px; font-weight: 700; color: #003D7C;
+        margin-bottom: 14px; display: flex; align-items: center; gap: 6px;
+    }
+    .dash-bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .dash-bar-row:last-child { margin-bottom: 0; }
+    .dash-bar-label { width: 180px; font-size: 13px; color: #4A4A49; flex-shrink: 0; }
+    .dash-bar-track {
+        flex: 1; background: #EAF1F8; border-radius: 999px; height: 12px; overflow: hidden;
+    }
+    .dash-bar-fill { height: 100%; border-radius: 999px; transition: width .3s; }
+    .dash-bar-value {
+        width: 30px; text-align: right; font-size: 13px; font-weight: 700; color: #003D7C;
+        flex-shrink: 0;
+    }
+
+    .dash-struct-table { width: 100%; border-collapse: collapse; }
+    .dash-struct-table th {
+        text-align: left; font-size: 12px; font-weight: 700; color: #4A4A49;
+        text-transform: uppercase; letter-spacing: .3px;
+        padding: 0 12px 10px; border-bottom: 1px solid #E3E8EE;
+    }
+    .dash-struct-table td {
+        padding: 12px; border-bottom: 1px solid #F0F3F7; font-size: 13.5px; color: #333;
+        vertical-align: top;
+    }
+    .dash-struct-table tr:last-child td { border-bottom: none; }
+    .dash-struct-table .dash-code { font-weight: 600; color: #003D7C; }
+    .dash-pill {
+        display: inline-block; padding: 1px 10px; border-radius: 999px;
+        font-size: 11.5px; font-weight: 600; border: 1px solid #009883;
+        color: #00695C; background: #E6F4F1; margin: 2px 3px 0 0;
+    }
+    .dash-empty { color: #8A8A88; font-style: italic; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -359,6 +413,28 @@ def render_exports_view() -> None:
                         st.rerun()
 
 
+def _dash_kpi(col, icon: str, value: int, label: str, accent: str = "") -> None:
+    cls = f"dash-kpi {accent}".strip()
+    col.markdown(
+        f'<div class="{cls}"><div class="dash-kpi-icon">{icon}</div>'
+        f'<div class="dash-kpi-value">{value}</div>'
+        f'<div class="dash-kpi-label">{label}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _dash_bar(label: str, value: int, total: int, color: str) -> str:
+    pct = round(value / total * 100) if total else 0
+    return (
+        '<div class="dash-bar-row">'
+        f'<div class="dash-bar-label">{html.escape(label)}</div>'
+        f'<div class="dash-bar-track"><div class="dash-bar-fill" '
+        f'style="width:{pct}%;background:{color}"></div></div>'
+        f'<div class="dash-bar-value">{value}</div>'
+        '</div>'
+    )
+
+
 def render_dashboard_view() -> None:
     """Tableau de bord : compteurs par statut et par mode de validation, plus la
     liste des structures reconnues (voir middleware.structure_index)."""
@@ -371,16 +447,20 @@ def render_dashboard_view() -> None:
         st.error(f"Impossible de contacter l'API ({API_URL}) : {exc}")
         return
 
+    _empty_struct = {"count": 0, "suppliers": []}
     try:
         struct_resp = api_get("/suppliers/structure-index")
-        struct_data = struct_resp.json() if struct_resp.status_code == 200 else {"count": 0, "suppliers": []}
+        struct_data = struct_resp.json() if struct_resp.status_code == 200 else _empty_struct
     except Exception:
-        struct_data = {"count": 0, "suppliers": []}
+        struct_data = _empty_struct
 
     total = len(pending_items)
     par_statut = {"pending": 0, "approved": 0, "needs_support": 0}
     approuves_auto = 0
-    par_source = {"structure_match_auto": 0, "structure_match": 0, "ai_generated": 0, "known_yaml": 0}
+    par_source = {
+        "structure_match_auto": 0, "structure_match": 0,
+        "ai_generated": 0, "known_yaml": 0,
+    }
     for it in pending_items:
         par_statut[it["status"]] = par_statut.get(it["status"], 0) + 1
         source = it.get("confidence_source")
@@ -388,41 +468,74 @@ def render_dashboard_view() -> None:
             par_source[source] += 1
         if it["status"] == "approved" and source == "structure_match_auto":
             approuves_auto += 1
+    approuves_main = par_statut["approved"] - approuves_auto
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Fichiers traités", total)
-    c2.metric("En attente", par_statut["pending"])
-    c3.metric("🆘 Aide support", par_statut["needs_support"])
-    c4.metric("Structures connues", struct_data.get("count", 0))
+    # ── Ligne de KPI ─────────────────────────────────────────────────────
+    k1, k2, k3, k4, k5 = st.columns(5)
+    _dash_kpi(k1, "📁", total, "Fichiers traités")
+    _dash_kpi(k2, "⏳", par_statut["pending"], "En attente", "dash-accent-wait")
+    _dash_kpi(k3, "✅", par_statut["approved"], "Validés", "dash-accent-ok")
+    _dash_kpi(k4, "🆘", par_statut["needs_support"], "Aide support", "dash-accent-support")
+    _dash_kpi(k5, "🔍", struct_data.get("count", 0), "Structures connues", "dash-accent-ok")
 
-    c5, c6, c7 = st.columns(3)
-    c5.metric("✅ Validés", par_statut["approved"])
-    c6.metric("↳ dont auto (0 clic)", approuves_auto)
-    c7.metric("↳ dont validés à la main", par_statut["approved"] - approuves_auto)
+    st.write("")
+    col_left, col_right = st.columns(2)
 
-    st.markdown("##### Origine des suggestions")
-    o1, o2, o3, o4 = st.columns(4)
-    o1.metric("🔍 Structure → auto", par_source["structure_match_auto"])
-    o2.metric("🔍 Structure → suggérée", par_source["structure_match"])
-    o3.metric("🤖 IA fraîche", par_source["ai_generated"])
-    o4.metric("📄 YAML connu", par_source["known_yaml"])
+    with col_left:
+        approuves_total = par_statut["approved"]
+        bars = _dash_bar("✅ Auto (0 clic)", approuves_auto, approuves_total, "#009883")
+        bars += _dash_bar("🖐️ Validé à la main", approuves_main, approuves_total, "#003D7C")
+        st.markdown(
+            '<div class="dash-card"><div class="dash-card-title">'
+            'Comment les validations se sont faites</div>'
+            f'{bars}</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.divider()
-    st.markdown("##### Structures reconnues (sans appel IA)")
+    with col_right:
+        src_auto = par_source["structure_match_auto"]
+        src_suggested = par_source["structure_match"]
+        bars = _dash_bar("🔍 Structure → auto", src_auto, total, "#009883")
+        bars += _dash_bar("🔍 Structure → suggérée", src_suggested, total, "#4A90D9")
+        bars += _dash_bar("🤖 IA fraîche", par_source["ai_generated"], total, "#F39C12")
+        bars += _dash_bar("📄 YAML connu", par_source["known_yaml"], total, "#8A8A88")
+        st.markdown(
+            '<div class="dash-card"><div class="dash-card-title">Origine des suggestions</div>'
+            f'{bars}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        '<div class="dash-card-title" style="margin-top:6px">'
+        '🔍 Structures reconnues (sans appel IA)</div>',
+        unsafe_allow_html=True,
+    )
     suppliers = struct_data.get("suppliers", [])
     if not suppliers:
-        st.info("Aucune structure enregistrée pour l'instant — s'enregistre à chaque approbation.")
+        st.markdown(
+            '<div class="dash-card"><span class="dash-empty">Aucune structure enregistrée '
+            'pour l\'instant — s\'enregistre à chaque approbation.</span></div>',
+            unsafe_allow_html=True,
+        )
     else:
-        h1, h2, h3 = st.columns([3, 2, 4])
-        h1.markdown("**Fournisseur**")
-        h2.markdown("**Colonnes d'en-tête**")
-        h3.markdown("**Cartouche vérifié**")
+        rows = ""
         for s in suppliers:
-            r1, r2, r3 = st.columns([3, 2, 4])
-            r1.write(s["supplier_code"])
-            r2.write(str(s["header_column_count"]))
             fields = s.get("file_metadata_fields") or []
-            r3.write(", ".join(fields) if fields else "—")
+            pills = "".join(f'<span class="dash-pill">{html.escape(f)}</span>' for f in fields)
+            rows += (
+                "<tr>"
+                f'<td class="dash-code">{html.escape(s["supplier_code"])}</td>'
+                f'<td>{s["header_column_count"]}</td>'
+                f'<td>{pills or "<span class=\'dash-empty\'>aucun</span>"}</td>'
+                "</tr>"
+            )
+        st.markdown(
+            '<div class="dash-card"><table class="dash-struct-table">'
+            "<thead><tr><th>Fournisseur</th><th>Colonnes d'en-tête</th>"
+            "<th>Cartouche vérifié</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table></div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ─── Helpers YAML ───────────────────────────────────────────────────────────
