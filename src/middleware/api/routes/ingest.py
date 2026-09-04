@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
+from middleware.core.config import get_settings
 from middleware.core.logging import get_logger
 from middleware.storage.minio_client import upload_raw_file
 
@@ -17,6 +18,37 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 PENDING_DIR = Path("/app/uploads/pending")
+EXPORTS_DIR = Path("/app/exports")
+
+# ── Email d'audit envoyé quand un fichier est auto-validé par reconnaissance de
+# structure (aucune intervention humaine) — best-effort, jamais bloquant. Sert à
+# ce qu'un humain puisse relire après coup et corriger si le match était erroné
+# (ex: deux fournisseurs différents avec des en-têtes coïncidemment identiques).
+# Modifiable directement ici : {supplier}, {matched_supplier}, {filename},
+# {folder}, {pending_id}, {link} sont remplacés automatiquement à l'envoi.
+AUTO_VALIDATION_EMAIL_SUBJECT = (
+    "[Audit] Export automatique par reconnaissance de structure — {supplier}"
+)
+
+AUTO_VALIDATION_EMAIL_BODY = """Bonjour,
+
+Un fichier a été exporté automatiquement vers Gery sans validation humaine —
+sa structure de colonnes correspondait exactement à celle d'un fournisseur
+déjà connu ({matched_supplier}).
+
+Fournisseur (nouveau) : {supplier}
+Fichier : {filename}
+Dossier SharePoint : {folder}
+ID de la demande : {pending_id}
+
+{link}
+
+Merci de vérifier que ce rapprochement est correct — si {supplier} n'est en
+réalité pas apparenté à {matched_supplier}, corrigez le mapping dans
+l'interface de validation.
+
+Cordialement,
+Middleware Ramery"""
 
 
 class UnknownIngestRequest(BaseModel):
@@ -153,8 +185,160 @@ def _apply_pending_suggestion(
     return True
 
 
-def _generate_ai_suggestion_background(
-    pending_id: str, file_path: Path, folder_name: str, filename: str
+def _rule_to_yaml_text(rule) -> str:
+    """Sérialise une MappingRule (objet, pas texte brut édité) en YAML lisible.
+
+    Utilisé uniquement pour la règle recalculée par l'auto-validation complète
+    (build_auto_validated_rule) — partout ailleurs, le YAML reste le texte brut
+    généré par l'IA ou édité à la main, jamais reconstruit depuis l'objet.
+    """
+    import io
+
+    from ruamel.yaml import YAML
+
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    stream = io.StringIO()
+    yaml.dump(rule.model_dump(mode="json", exclude_none=True), stream)
+    return stream.getvalue()
+
+
+def _send_auto_validation_audit_email(
+    pending_id: str, meta: dict, matched_supplier: str
+) -> None:
+    """Envoie l'email d'audit après une auto-validation par structure (best-effort)."""
+    from middleware.notifications import send_support_notification
+
+    review_ui_url = get_settings().review_ui_url
+    link = (
+        f"Ouvrir l'interface de validation : {review_ui_url}"
+        if review_ui_url
+        else "Interface de validation : (lien non configuré — voir MIDDLEWARE_REVIEW_UI_URL)"
+    )
+    values = {
+        "supplier": meta.get("supplier_code") or meta.get("supplier_guess", "?"),
+        "matched_supplier": matched_supplier,
+        "filename": meta.get("filename", "?"),
+        "folder": meta.get("folder_name", "?"),
+        "pending_id": pending_id,
+        "link": link,
+    }
+    send_support_notification(
+        AUTO_VALIDATION_EMAIL_SUBJECT.format(**values),
+        AUTO_VALIDATION_EMAIL_BODY.format(**values),
+    )
+
+
+async def _try_full_auto_validation(
+    pending_id: str,
+    file_path: Path,
+    folder_name: str,
+    filename: str,
+    sharepoint_item_id: str | None,
+    matched_code: str,
+    supplier_guess: str,
+) -> bool:
+    """Tente l'auto-validation complète (0 clic humain) d'un fichier à structure connue.
+
+    N'auto-valide QUE si toutes les garanties tiennent : plage de données
+    recalculée avec succès (voir build_auto_validated_rule), cartouche
+    (SIREN/dates/code générique) qui s'extrait là où il s'extrayait sur le
+    fichier d'origine (verify_file_metadata_presence — jamais en comparant les
+    valeurs), et aucun souci de cohérence à l'extraction. Au moindre doute,
+    retourne False sans rien avoir modifié — l'appelant retombe alors sur la
+    suggestion pré-remplie + validation humaine, comme avant.
+    """
+    from middleware.api.routes.processing import _check_coherence
+    from middleware.db.session import AsyncSessionLocal
+    from middleware.pipeline import parse_with_rule, process_and_export
+    from middleware.structure_index import (
+        build_auto_validated_rule,
+        update_fingerprint,
+        verify_file_metadata_presence,
+    )
+
+    rule = build_auto_validated_rule(matched_code, file_path)
+    if rule is None:
+        return False
+    rule = rule.model_copy(update={
+        "supplier_code": supplier_guess,
+        "sharepoint_folder": folder_name,
+        "filename_keywords": [],
+    })
+
+    try:
+        result = parse_with_rule(file_path, rule)
+    except Exception as exc:
+        logger.warning(
+            "parsing avec règle recalculée échoué — repli validation humaine",
+            pending_id=pending_id, erreur=str(exc),
+        )
+        return False
+
+    if _check_coherence(result, rule):
+        return False
+    if not verify_file_metadata_presence(matched_code, result.file_metadata):
+        logger.info(
+            "cartouche incomplet par rapport au fournisseur matché — repli validation humaine",
+            pending_id=pending_id, matched_supplier=matched_code,
+        )
+        return False
+
+    try:
+        async with AsyncSessionLocal() as session:
+            try:
+                parse_result, _, export_result = await process_and_export(
+                    session, rule, file_path, EXPORTS_DIR,
+                    original_filename=filename, sharepoint_item_id=sharepoint_item_id,
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+    except Exception as exc:
+        logger.warning(
+            "export automatique par structure échoué — repli validation humaine",
+            pending_id=pending_id, erreur=str(exc),
+        )
+        return False
+
+    yaml_text = _rule_to_yaml_text(rule)
+
+    CONFIG_DIR = Path("config/suppliers")
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    (CONFIG_DIR / f"{supplier_guess}_v1.yaml").write_text(yaml_text, encoding="utf-8")
+    update_fingerprint(supplier_guess, file_path, rule, parse_result.file_metadata)
+
+    meta_path = PENDING_DIR / f"{pending_id}.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        meta = {}
+    meta.update({
+        "yaml_proposed": yaml_text,
+        "confidence": 95,
+        "confidence_source": "structure_match_auto",
+        "supplier_guess": supplier_guess,
+        "supplier_code": supplier_guess,
+        "status": "approved",
+        "exports": [f.path.name for f in export_result.files],
+    })
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    logger.info(
+        "auto-validation complète — structure connue, cartouche cohérent, 0 clic humain",
+        pending_id=pending_id, matched_supplier=matched_code, supplier_guess=supplier_guess,
+    )
+    _send_auto_validation_audit_email(pending_id, meta, matched_code)
+    return True
+
+
+async def _generate_ai_suggestion_background(
+    pending_id: str,
+    file_path: Path,
+    folder_name: str,
+    filename: str,
+    sharepoint_item_id: str | None = None,
 ) -> None:
     """Tâche de fond : propose un mapping pour ce fichier et met à jour le pending JSON.
 
@@ -165,9 +349,12 @@ def _generate_ai_suggestion_background(
     disponible).
 
     Essaie d'abord une correspondance de structure EXACTE avec un fournisseur déjà
-    validé (mêmes libellés de colonnes, à la même position — voir structure_index.py)
-    — si trouvée, reprend directement son YAML (rapide, gratuit, déterministe) au lieu
-    d'appeler l'IA. Sinon, comportement inchangé : génération IA fraîche.
+    validé (mêmes libellés de colonnes, à la même position — voir structure_index.py).
+    Si trouvée : tente l'auto-validation complète (voir _try_full_auto_validation) ;
+    si les garanties supplémentaires ne tiennent pas, reprend simplement son YAML
+    comme suggestion pré-remplie (rapide, gratuit, déterministe, mais validation
+    humaine requise). Si aucune structure ne correspond : génération IA fraîche,
+    comportement inchangé.
     """
     from middleware.structure_index import find_matching_supplier
 
@@ -184,6 +371,21 @@ def _generate_ai_suggestion_background(
         yaml_path = Path("config/suppliers") / f"{matched_code}_v1.yaml"
         if yaml_path.exists():
             supplier_guess = folder_name.lower().replace(" ", "_").replace("-", "_")
+
+            try:
+                auto_validated = await _try_full_auto_validation(
+                    pending_id, file_path, folder_name, filename,
+                    sharepoint_item_id, matched_code, supplier_guess,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "auto-validation complète échouée (ignorée) — repli suggestion",
+                    pending_id=pending_id, erreur=str(exc),
+                )
+                auto_validated = False
+            if auto_validated:
+                return
+
             yaml_proposed = yaml_path.read_text(encoding="utf-8")
             yaml_proposed = _inject_supplier_code(yaml_proposed, supplier_guess)
             yaml_proposed = _inject_sharepoint_folder(yaml_proposed, folder_name)
@@ -297,6 +499,7 @@ async def ingest_unknown(
     background_tasks.add_task(
         _generate_ai_suggestion_background,
         pending_id, file_path, request.folder_name, request.filename,
+        request.sharepoint_item_id,
     )
 
     return UnknownIngestResponse(

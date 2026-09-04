@@ -432,10 +432,6 @@ async def approve_pending(
     logger.info("yaml approuvé sauvegardé", path=str(yaml_path))
 
     file_path = Path(meta.get("file_path", ""))
-    if file_path.exists():
-        from middleware.structure_index import update_fingerprint
-        update_fingerprint(supplier_code, file_path, rule)
-
     if not file_path.exists():
         return ApproveResult(
             kind="file_missing",
@@ -448,7 +444,7 @@ async def approve_pending(
     # Traitement complet via le service partagé (archivage MinIO, DB, export CSV)
     try:
         EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        _, _, export_result = await process_and_export(
+        parse_result, _, export_result = await process_and_export(
             session,
             rule,
             file_path,
@@ -465,6 +461,9 @@ async def approve_pending(
             message=f"Le YAML est enregistré, mais {_friendly_processing_error(exc)}",
             supplier_code=supplier_code,
         )
+
+    from middleware.structure_index import update_fingerprint
+    update_fingerprint(supplier_code, file_path, rule, parse_result.file_metadata)
 
     exports = [f.path.name for f in export_result.files]
 
