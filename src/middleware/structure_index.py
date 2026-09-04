@@ -89,11 +89,22 @@ def extract_header_signature(file_path: Path, rule: MappingRule) -> HeaderSignat
     return signature if len(signature) >= _MIN_SIGNATURE_CELLS else None
 
 
+def _has_value(value: object) -> bool:
+    """None ou chaîne vide/blanche = absent. Une cellule vraiment vide peut
+    remonter comme '' (pas None) selon le lecteur Excel utilisé — traiter les
+    deux cas pareil, sinon une cellule vide compterait comme "présente"."""
+    if value is None:
+        return False
+    if isinstance(value, str) and not value.strip():
+        return False
+    return True
+
+
 def _file_metadata_present(file_metadata: FileMetadataPivot) -> list[str]:
-    """Liste triée des champs file_metadata effectivement extraits (non None)."""
+    """Liste triée des champs file_metadata effectivement extraits (non vides)."""
     return sorted(
         field for field in _FILE_METADATA_FIELDS
-        if getattr(file_metadata, field, None) is not None
+        if _has_value(getattr(file_metadata, field, None))
     )
 
 
@@ -136,14 +147,17 @@ def update_fingerprint(
         )
 
 
-def find_matching_supplier(file_path: Path) -> str | None:
+def find_matching_supplier(file_path: Path) -> tuple[str, int] | None:
     """Cherche un fournisseur déjà connu dont l'en-tête correspond EXACTEMENT à une
     ligne du nouveau fichier (mêmes colonnes, mêmes libellés normalisés, même ordre).
 
     Scanne les premières lignes de chaque feuille du nouveau fichier ; dès qu'une
-    ligne correspond mot pour mot à une empreinte connue, retourne ce supplier_code.
-    None si rien ne correspond (ou en cas d'erreur de lecture) — la génération IA
-    prend alors le relais comme avant.
+    ligne correspond mot pour mot à une empreinte connue, retourne
+    (supplier_code, numéro de ligne 1-indexé où le match a été trouvé) — ce numéro
+    est indispensable à build_auto_validated_rule pour décaler les positions
+    (l'en-tête peut être sur une ligne différente d'un fichier à l'autre, même à
+    contenu de colonnes identique). None si rien ne correspond (ou en cas d'erreur
+    de lecture) — la génération IA prend alors le relais comme avant.
     """
     known = {code: sig for code, sig in _iter_header_signatures(_load_index())}
     if not known:
@@ -154,13 +168,13 @@ def find_matching_supplier(file_path: Path) -> str | None:
         return None
 
     for sheet in sheets.values():
-        for row in sheet[:_MAX_SCAN_ROWS]:
+        for row_idx, row in enumerate(sheet[:_MAX_SCAN_ROWS]):
             row_sig = _row_signature(row)
             if len(row_sig) < _MIN_SIGNATURE_CELLS:
                 continue
             for code, known_sig in known.items():
                 if row_sig == known_sig:
-                    return code
+                    return code, row_idx + 1
     return None
 
 
@@ -195,20 +209,36 @@ def _parse_row_range(rows_spec: str) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
-def build_auto_validated_rule(matched_code: str, new_file_path: Path) -> MappingRule | None:
+def build_auto_validated_rule(
+    matched_code: str, new_file_path: Path, new_header_row: int
+) -> MappingRule | None:
     """Construit une règle adaptée au nouveau fichier à partir du mapping matché.
 
-    Recalcule les plages de lignes (matrix/multi_table) contre la VRAIE taille
-    du nouveau fichier au lieu de copier aveuglément celles du fichier
-    d'origine — sinon des lignes de produits en plus par rapport au fichier
-    d'origine seraient silencieusement ignorées (hors plage copiée).
+    `new_header_row` : ligne (1-indexée) où l'en-tête a été retrouvé dans le
+    NOUVEAU fichier — donnée par find_matching_supplier. L'en-tête peut être à
+    une ligne différente de celle du fichier d'origine (cartouche plus court/
+    long au-dessus) même à contenu de colonnes strictement identique : toutes
+    les positions du mapping matché sont donc décalées du même écart
+    (`new_header_row - rule.header_detection.row`) avant tout autre ajustement
+    — sinon la ligne d'en-tête elle-même finirait lue comme une ligne de
+    produit (bug constaté en test réel).
+
+    Recalcule ensuite les bornes de FIN de plage (matrix/multi_table) contre la
+    VRAIE taille du nouveau fichier au lieu de copier aveuglément celle du
+    fichier d'origine — sinon des lignes de produits en plus par rapport au
+    fichier d'origine seraient silencieusement ignorées (hors plage copiée).
     - matrix : une seule zone par feuille → borne de fin étendue à la taille
       réelle de la feuille (le row_filter existant élimine déjà les lignes
       vides au-delà des vraies données).
     - multi_table : plusieurs zones empilées sur la même feuille → la borne de
-      fin d'un sous-tableau est calée juste avant l'en-tête du suivant (ou la
-      fin de la feuille pour le dernier), jamais devinée.
-    - table : aucun recalcul nécessaire (lit déjà jusqu'à la fin de la feuille).
+      fin d'un sous-tableau est calée juste avant l'en-tête (décalé) du
+      suivant (ou la fin de la feuille pour le dernier), jamais devinée. Tous
+      les sous-tableaux sont supposés décalés du MÊME écart — hypothèse
+      raisonnable (un cartouche plus long/court en haut de fichier décale tout
+      le reste uniformément) mais pas garantie si l'espacement entre tableaux
+      varie lui aussi d'un fichier à l'autre.
+    - table : seul data_starts_row est décalé, aucune borne de fin à recalculer
+      (lit déjà jusqu'à la fin de la feuille).
 
     Retourne None si le mode de détection n'est pas 'explicit', ou si un
     recalcul sûr n'est pas possible — jamais d'exception qui remonte, l'appelant
@@ -225,7 +255,7 @@ def build_auto_validated_rule(matched_code: str, new_file_path: Path) -> Mapping
         return None
     if rule is None or errors:
         return None
-    if rule.header_detection.mode != "explicit":
+    if rule.header_detection.mode != "explicit" or rule.header_detection.row is None:
         return None
 
     try:
@@ -235,20 +265,52 @@ def build_auto_validated_rule(matched_code: str, new_file_path: Path) -> Mapping
         return None
     sheet_len = len(sheet)
 
+    delta = new_header_row - rule.header_detection.row
+
     try:
-        if rule.extraction_mode == "matrix" and rule.data_zone is not None:
+        rule = rule.model_copy(update={
+            "header_detection": rule.header_detection.model_copy(
+                update={"row": new_header_row}
+            ),
+        })
+
+        if rule.extraction_mode == "table":
+            rule = rule.model_copy(update={"data_starts_row": rule.data_starts_row + delta})
+
+        elif rule.extraction_mode == "matrix" and rule.data_zone is not None:
             row_start, _row_end = _parse_row_range(rule.data_zone.rows)
             new_data_zone = rule.data_zone.model_copy(
-                update={"rows": f"{row_start}:{sheet_len}"}
+                update={"rows": f"{row_start + delta}:{sheet_len}"}
             )
-            rule = rule.model_copy(update={"data_zone": new_data_zone})
+            new_price_matrix = rule.price_matrix.model_copy(update={
+                "tier_axis": rule.price_matrix.tier_axis.model_copy(
+                    update={"header_row": rule.price_matrix.tier_axis.header_row + delta}
+                ),
+                "variant_axis": rule.price_matrix.variant_axis.model_copy(
+                    update={"header_row": rule.price_matrix.variant_axis.header_row + delta}
+                ),
+            })
+            rule = rule.model_copy(update={
+                "data_zone": new_data_zone, "price_matrix": new_price_matrix,
+            })
 
         elif rule.extraction_mode == "multi_table" and rule.tables:
-            new_tables = []
-            for i, sub_table in enumerate(rule.tables):
+            shifted_tables = []
+            for sub_table in rule.tables:
                 row_start, _row_end = _parse_row_range(sub_table.zone.data_rows)
-                if i + 1 < len(rule.tables):
-                    new_end = rule.tables[i + 1].zone.header_row - 1
+                # borne de fin recalculée juste après (placeholder = début, le temps
+                # de connaître le header_row décalé de tous les sous-tableaux)
+                new_zone = sub_table.zone.model_copy(update={
+                    "header_row": sub_table.zone.header_row + delta,
+                    "data_rows": f"{row_start + delta}:{row_start + delta}",
+                })
+                shifted_tables.append(sub_table.model_copy(update={"zone": new_zone}))
+
+            new_tables = []
+            for i, sub_table in enumerate(shifted_tables):
+                row_start, _placeholder_end = _parse_row_range(sub_table.zone.data_rows)
+                if i + 1 < len(shifted_tables):
+                    new_end = shifted_tables[i + 1].zone.header_row - 1
                 else:
                     new_end = sheet_len
                 new_zone = sub_table.zone.model_copy(
@@ -256,10 +318,10 @@ def build_auto_validated_rule(matched_code: str, new_file_path: Path) -> Mapping
                 )
                 new_tables.append(sub_table.model_copy(update={"zone": new_zone}))
             rule = rule.model_copy(update={"tables": new_tables})
-        # mode table : rien à recalculer, lit déjà jusqu'à la fin de la feuille.
+        # mode table : déjà décalé ci-dessus, aucune borne de fin à recalculer.
     except Exception as exc:
         logger.warning(
-            "recalcul de plage impossible (repli vers validation humaine)",
+            "recalcul de position/plage impossible (repli vers validation humaine)",
             supplier_code=matched_code,
             erreur=str(exc),
         )

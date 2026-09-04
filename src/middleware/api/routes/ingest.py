@@ -236,6 +236,7 @@ async def _try_full_auto_validation(
     filename: str,
     sharepoint_item_id: str | None,
     matched_code: str,
+    matched_row: int,
     supplier_guess: str,
 ) -> bool:
     """Tente l'auto-validation complète (0 clic humain) d'un fichier à structure connue.
@@ -257,7 +258,7 @@ async def _try_full_auto_validation(
         verify_file_metadata_presence,
     )
 
-    rule = build_auto_validated_rule(matched_code, file_path)
+    rule = build_auto_validated_rule(matched_code, file_path, matched_row)
     if rule is None:
         return False
     rule = rule.model_copy(update={
@@ -359,15 +360,16 @@ async def _generate_ai_suggestion_background(
     from middleware.structure_index import find_matching_supplier
 
     try:
-        matched_code = find_matching_supplier(file_path)
+        match = find_matching_supplier(file_path)
     except Exception as exc:
         logger.warning(
             "recherche de structure connue échouée (ignorée)",
             pending_id=pending_id, erreur=str(exc),
         )
-        matched_code = None
+        match = None
 
-    if matched_code is not None:
+    if match is not None:
+        matched_code, matched_row = match
         yaml_path = Path("config/suppliers") / f"{matched_code}_v1.yaml"
         if yaml_path.exists():
             supplier_guess = folder_name.lower().replace(" ", "_").replace("-", "_")
@@ -375,7 +377,7 @@ async def _generate_ai_suggestion_background(
             try:
                 auto_validated = await _try_full_auto_validation(
                     pending_id, file_path, folder_name, filename,
-                    sharepoint_item_id, matched_code, supplier_guess,
+                    sharepoint_item_id, matched_code, matched_row, supplier_guess,
                 )
             except Exception as exc:
                 logger.warning(
