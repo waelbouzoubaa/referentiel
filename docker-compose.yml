@@ -10,15 +10,13 @@ services:
       POSTGRES_DB: middleware
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U middleware"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # ── Stockage objet (MinIO = GCS compatible en dev) ───────────────────────────
+  # ── Stockage objet (MinIO = GCS compatible en dev) ──────────────────────────
   minio:
     image: minio/minio:latest
     container_name: middleware-minio
@@ -26,16 +24,28 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_BROWSER_REDIRECT_URL: https://minio.${MAIN_DOMAIN}
     volumes:
       - minio_data:/data
-    ports:
-      - "9010:9000"   # API S3 (9000 occupé par Portainer)
-      - "9011:9001"   # Console web
+    #ports:
+    #  - "9010:9000"   # API S3 (9000 occupé par Portainer)
+    #  - "9011:9001"   # Console web
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - default
+      - infra_networks
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=infra_networks"
+      - "traefik.http.routers.minio.rule=Host(`minio.${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.minio.entrypoints=websecure"
+      - "traefik.http.services.minio.loadbalancer.server.port=9001"
+      - "traefik.http.routers.minio.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.minio.middlewares=core-ipallowList@docker"
 
   # ── Création du bucket au démarrage ─────────────────────────────────────────
   minio-init:
@@ -62,8 +72,8 @@ services:
     env_file:
       - .env
     environment:
-      MIDDLEWARE_DATABASE_URL: postgresql+asyncpg://middleware:middleware@postgres:5432/middleware
-      MIDDLEWARE_STORAGE_ENDPOINT: http://minio:9000
+      MIDDLEWARE_DATABASE_URL: postgresql+asyncpg://middleware:middleware@middleware-postgres:5432/middleware
+      MIDDLEWARE_STORAGE_ENDPOINT: http://middleware-minio:9000
       MIDDLEWARE_STORAGE_BUCKET: middleware-dev
       MIDDLEWARE_STORAGE_ACCESS_KEY: minioadmin
       MIDDLEWARE_STORAGE_SECRET_KEY: minioadmin
@@ -73,7 +83,7 @@ services:
       MIDDLEWARE_INPUT_FOLDER: /data/input
       MIDDLEWARE_OUTPUT_FOLDER: /data/output
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      MIDDLEWARE_API_URL: http://localhost:8000
+      MIDDLEWARE_API_URL: https://middleware-api.${MAIN_DOMAIN}
     volumes:
       - ./src:/app/src:ro
       - ./config:/app/config
@@ -81,8 +91,6 @@ services:
       - ./data/output:/data/output
       - uploads:/app/uploads
       - exports:/app/exports
-    ports:
-      - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,11 +102,24 @@ services:
       --port 8000
       --reload
       --reload-dir /app/src
+      --proxy-headers
+      --forwarded-allow-ips=*
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - default
+      - infra_networks
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=infra_networks"
+      - "traefik.http.routers.middleware-api.rule=Host(`middleware-api.${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.middleware-api.entrypoints=websecure"
+      - "traefik.http.services.middleware-api.loadbalancer.server.port=8000"
+      - "traefik.http.routers.middleware-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.middleware-api.middlewares=core-ipallowList@docker"
 
   # ── Watcher SharePoint ───────────────────────────────────────────────────────
   watcher:
@@ -109,7 +130,7 @@ services:
     env_file:
       - .env
     environment:
-      MIDDLEWARE_API_URL: http://api:8000
+      MIDDLEWARE_API_URL: http://middleware-api:8000
       UPLOADS_DIR: /app/uploads
       PYTHONUNBUFFERED: "1"
     volumes:
@@ -127,7 +148,7 @@ services:
       dockerfile: Dockerfile
     container_name: middleware-review-ui
     environment:
-      MIDDLEWARE_API_URL: http://api:8000
+      MIDDLEWARE_API_URL: http://middleware-api:8000
     volumes:
       - ./docs:/app/docs:ro
     #ports:
@@ -141,12 +162,12 @@ services:
       - infra_networks
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=infra_networks"
       - "traefik.http.routers.refs-fournisseurs.rule=Host(`refs-fournisseurs.${MAIN_DOMAIN}`)"
       - "traefik.http.routers.refs-fournisseurs.entrypoints=websecure"
       - "traefik.http.services.refs-fournisseurs.loadbalancer.server.port=8501"
       - "traefik.http.routers.refs-fournisseurs.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.refs-fournisseurs.middlewares=ip-allowlist@docker"
-      - "traefik.http.middlewares.ip-allowlist.ipallowlist.sourcerange=130.180.219.24/32,82.96.153.97/32"
+      - "traefik.http.routers.refs-fournisseurs.middlewares=core-ipallowList@docker"
 
 volumes:
   postgres_data:
