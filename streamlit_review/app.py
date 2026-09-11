@@ -484,7 +484,7 @@ def render_dashboard_view() -> None:
     with col_left:
         approuves_total = par_statut["approved"]
         bars = _dash_bar("✅ Auto (0 clic)", approuves_auto, approuves_total, "#009883")
-        bars += _dash_bar("🖐️ Validé à la main", approuves_main, approuves_total, "#003D7C")
+        bars += _dash_bar("✍️ Validation manuelle", approuves_main, approuves_total, "#003D7C")
         st.markdown(
             '<div class="dash-card"><div class="dash-card-title">'
             'Comment les validations se sont faites</div>'
@@ -497,8 +497,12 @@ def render_dashboard_view() -> None:
         src_suggested = par_source["structure_match"]
         bars = _dash_bar("🔍 Structure → auto", src_auto, total, "#009883")
         bars += _dash_bar("🔍 Structure → suggérée", src_suggested, total, "#4A90D9")
-        bars += _dash_bar("🤖 IA fraîche", par_source["ai_generated"], total, "#F39C12")
-        bars += _dash_bar("📄 YAML connu", par_source["known_yaml"], total, "#8A8A88")
+        bars += _dash_bar("🤖 Généré par IA", par_source["ai_generated"], total, "#F39C12")
+        # "YAML connu" masqué pour l'instant : ce chemin (generate_gery_exports_endpoint,
+        # fournisseur déjà connu par son dossier) n'a pas encore les mêmes vérifications
+        # renforcées que la reconnaissance de structure (cartouche, code générique) — sa
+        # confiance affichée n'est donc pas comparable aux autres lignes. À réafficher une
+        # fois ce chemin aligné (voir mémoire projet).
         st.markdown(
             '<div class="dash-card"><div class="dash-card-title">Origine des suggestions</div>'
             f'{bars}</div>',
