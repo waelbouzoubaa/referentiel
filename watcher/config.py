@@ -7,6 +7,12 @@ TENANT_ID = os.getenv("TENANT_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
+# Auth par certificat (remplace CLIENT_SECRET si les deux sont renseignés).
+# CERT_PRIVATE_KEY_PATH pointe vers un fichier .key monté dans le conteneur
+# (jamais copié dans l'image Docker, jamais commité sur git).
+CERT_THUMBPRINT = os.getenv("CERT_THUMBPRINT")
+CERT_PRIVATE_KEY_PATH = os.getenv("CERT_PRIVATE_KEY_PATH")
+
 SHAREPOINT_HOST = os.getenv("SHAREPOINT_HOST")
 SHAREPOINT_SITE_PATH = os.getenv("SHAREPOINT_SITE_PATH", "/")
 

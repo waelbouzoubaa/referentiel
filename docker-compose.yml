@@ -133,9 +133,11 @@ services:
       MIDDLEWARE_API_URL: http://middleware-api:8000
       UPLOADS_DIR: /app/uploads
       PYTHONUNBUFFERED: "1"
+      CERT_PRIVATE_KEY_PATH: /app/certs/private_key.pem
     volumes:
       - uploads:/app/uploads
       - watcher_state:/app/state
+      - ./certs/maikhub-middleware-ramery.key:/app/certs/private_key.pem:ro
     depends_on:
       api:
         condition: service_healthy

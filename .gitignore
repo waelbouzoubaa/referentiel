@@ -1,5 +1,6 @@
 .env
 docker-compose.override.yml
+certs/
 .venv/
 __pycache__/
 *.pyc
