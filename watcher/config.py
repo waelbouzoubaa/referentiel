@@ -16,6 +16,11 @@ CERT_PRIVATE_KEY_PATH = os.getenv("CERT_PRIVATE_KEY_PATH")
 SHAREPOINT_HOST = os.getenv("SHAREPOINT_HOST")
 SHAREPOINT_SITE_PATH = os.getenv("SHAREPOINT_SITE_PATH", "/")
 
+# Optionnel : restreint le watcher à un sous-dossier du drive au lieu de toute sa
+# racine (ex. "Documents par Fournisseur"). Vide par défaut = comportement
+# historique inchangé (scan de tout le drive).
+SHAREPOINT_ROOT_FOLDER = os.getenv("SHAREPOINT_ROOT_FOLDER", "")
+
 MIDDLEWARE_API_URL = os.getenv("MIDDLEWARE_API_URL", "http://api:8000")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))
 

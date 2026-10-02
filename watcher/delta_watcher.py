@@ -4,8 +4,16 @@ import json
 import uuid
 import requests
 from pathlib import Path
-from sharepoint_client import get_headers, get_site_id, get_drive_id, get_list_columns, get_item_fields
-from config import POLL_INTERVAL, MIDDLEWARE_API_URL, UPLOADS_DIR, STATE_DIR, TAG_COLUMN_NAME, TAG_COLUMN_READY_VALUE
+from sharepoint_client import get_headers, get_site_id, get_drive_id, get_folder_id, get_list_columns, get_item_fields
+from config import (
+    POLL_INTERVAL,
+    MIDDLEWARE_API_URL,
+    UPLOADS_DIR,
+    STATE_DIR,
+    TAG_COLUMN_NAME,
+    TAG_COLUMN_READY_VALUE,
+    SHAREPOINT_ROOT_FOLDER,
+)
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -340,10 +348,17 @@ def run():
     drive_id = get_drive_id(site_id)
     print(f"Drive ID : {drive_id}")
 
+    if SHAREPOINT_ROOT_FOLDER:
+        folder_id = get_folder_id(drive_id, SHAREPOINT_ROOT_FOLDER)
+        delta_root = f"{GRAPH_URL}/drives/{drive_id}/items/{folder_id}/delta"
+        print(f"Dossier racine restreint : '{SHAREPOINT_ROOT_FOLDER}' (id={folder_id})")
+    else:
+        delta_root = f"{GRAPH_URL}/drives/{drive_id}/root/delta"
+
     delta_link, file_cache = load_state(drive_id)
     if not delta_link:
         print("Premier scan complet...")
-        delta_link = f"{GRAPH_URL}/drives/{drive_id}/root/delta"
+        delta_link = delta_root
 
     _resolve_tag_field_name(drive_id)
 

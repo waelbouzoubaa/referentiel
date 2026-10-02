@@ -318,12 +318,88 @@ Ne garder le `.cer` que le temps de le transmettre à Sani (§6).
 
 ---
 
+## 7. Certificat de production — généré directement sur la machine de prod (GCP)
+
+**Contexte différent du reste de ce doc** : plutôt que de réutiliser le certificat
+MaikHub pour la vraie prod Ramery, décision prise le 2026-09-28 de **générer un
+certificat neuf directement sur la machine de prod** (`srv-maikhub-gcp-ramery-prod`,
+GCP, connectée via le SSH intégré du navigateur dans la Cloud Console — pas de
+`gcloud` CLI ni de nom DNS public résolvable depuis un poste externe). Raison :
+la clé privée naît directement là où elle va vivre, aucune copie/transfert du
+`.key` nécessaire. Autre changement de process : ce n'est plus Dominique qui gère
+l'étape Azure via Sani, mais **un développeur interne côté Ramery** qui reprend le
+process à partir d'ici — on lui fournit le certificat + les instructions, il fait
+le reste côté Azure (voir checklist plus bas).
+
+Mêmes commandes qu'au §1, lancées directement sur la machine de prod (pas de souci
+`MSYS_NO_PATHCONV` — c'est du Linux natif, pas Git Bash Windows) :
+```bash
+mkdir -p ~/tmp/cert && cd ~/tmp/cert
+openssl genrsa -out maikhub-middleware-ramery.key 2048
+openssl req -new -x509 \
+  -key maikhub-middleware-ramery.key \
+  -out maikhub-middleware-ramery.cer \
+  -days 365 \
+  -subj "/CN=MaikHub-Middleware-CataloguesFournisseurs/O=MaikHub/C=FR"
+openssl x509 -in maikhub-middleware-ramery.cer -noout -fingerprint -sha1
+```
+
+✅ Étape validée le 2026-09-28. Résultat obtenu :
+- Thumbprint : `5FA0DF30C112F2A353DD7C2B070DBBBF47E599F9`
+- Validité : `28/09/2026` → `28/09/2027`
+- Subject vérifié : `CN=MaikHub-Middleware-CataloguesFournisseurs, O=MaikHub, C=FR` ✅
+
+**Téléchargement du `.cer` en local** (pas de `scp` classique possible, hostname
+interne non résolvable) — utiliser la fonction intégrée du terminal SSH-dans-le-
+navigateur de la Cloud Console GCP : icône **⚙️ en haut à droite → "Download
+file"**, coller le chemin **absolu** du fichier (obtenu via `realpath
+~/tmp/cert/maikhub-middleware-ramery.cer`). Télécharge dans le dossier
+Téléchargements Windows.
+
+**⚠️ À faire avant de considérer cette étape terminée** (pas encore fait au
+2026-09-28) :
+- Déplacer `.key`/`.pfx` hors de `~/tmp/` (répertoire temporaire, potentiellement
+  purgé) vers un emplacement permanent, ex. `~/middleware-ramery/certs/` avec
+  permissions `700`/`600` comme sur le VPS de test (voir §2 du reste du doc pour le
+  pattern).
+- Déployer le code du watcher (support certificat, déjà sur `origin/main` depuis le
+  commit `1d45b9d`) sur cette machine de prod.
+- Ajouter `CERT_THUMBPRINT=5FA0DF30C112F2A353DD7C2B070DBBBF47E599F9` dans le `.env`
+  de cette machine, une fois `TENANT_ID`/`CLIENT_ID` de Ramery connus (voir
+  checklist ci-dessous).
+
+### Ce qui doit rester uniquement sur cette machine (jamais transmis)
+- `maikhub-middleware-ramery.key`
+- `maikhub-middleware-ramery.pfx` (si créé) + son mot de passe (stocké séparément,
+  ex. gestionnaire de mots de passe — jamais dans un fichier texte ni dans git)
+
+### Ce qu'on transmet au développeur interne Ramery
+- `maikhub-middleware-ramery.cer` (fichier, pas sensible)
+- Le thumbprint `5FA0DF30C112F2A353DD7C2B070DBBBF47E599F9` (pas indispensable
+  techniquement — Azure le recalcule lui-même à l'upload — mais sert de
+  vérification d'intégrité : si le thumbprint qu'Azure affiche après son upload ne
+  correspond pas à celui-ci, mauvais fichier / transfert corrompu, à refaire)
+- Instructions : créer/utiliser une app registration côté tenant Ramery → uploader
+  ce `.cer` (Certificates & secrets → Certificates → Upload certificate) →
+  vérifier thumbprint identique → s'assurer que `Sites.Selected` est accordé sur
+  le site SharePoint concerné.
+
+### Ce qu'il doit renvoyer, pour finaliser la config du watcher
+- `TENANT_ID` (tenant Ramery)
+- `CLIENT_ID` (app créée/utilisée côté Ramery)
+
+---
+
 ## Repères rapides
 
 | Info | Valeur |
 |---|---|
 | Tenant MaikHub | `1a0f9db2-ab9b-45fa-a9db-a03186b50e5e` |
 | App test (MaikHub) | `lecture_fichier` / `4c8fed44-2a06-44cb-b371-932fcd764d3e` |
-| Thumbprint cert actuel | `46AEE77C314281D43BFD479778A2B1466645A331` |
-| Expiration cert actuel | `25/09/2027` |
-| Site SharePoint testé | `/sites/ref-fournisseur` (voir `.env` → `SHAREPOINT_SITE_PATH`) |
+| Thumbprint cert MaikHub (test) | `46AEE77C314281D43BFD479778A2B1466645A331` |
+| Expiration cert MaikHub | `25/09/2027` |
+| Site SharePoint testé (MaikHub) | `/sites/ref-fournisseur` (voir `.env` → `SHAREPOINT_SITE_PATH`) |
+| Machine de prod | `srv-maikhub-gcp-ramery-prod` (GCP, SSH via Cloud Console) |
+| Thumbprint cert prod | `5FA0DF30C112F2A353DD7C2B070DBBBF47E599F9` |
+| Expiration cert prod | `28/09/2027` |
+| `TENANT_ID`/`CLIENT_ID` Ramery | ⏳ en attente du développeur interne Ramery |

@@ -57,6 +57,19 @@ def get_drive_id(site_id):
     return drives[0]["id"]
 
 
+def get_folder_id(drive_id, folder_path):
+    """Résout l'ID d'un sous-dossier du drive à partir de son chemin
+    (ex: 'Documents par Fournisseur'), pour restreindre le watcher à ce
+    sous-dossier au lieu de toute la racine du drive."""
+    path = folder_path.strip("/")
+    resp = requests.get(
+        f"{GRAPH_URL}/drives/{drive_id}/root:/{path}",
+        headers=get_headers()
+    )
+    resp.raise_for_status()
+    return resp.json()["id"]
+
+
 def get_list_columns(drive_id):
     """Colonnes de la bibliothèque de documents associée au drive."""
     resp = requests.get(
