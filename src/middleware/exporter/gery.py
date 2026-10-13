@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -314,20 +313,24 @@ def _format_tier_label(price: PricePivot) -> str:
 # Écriture Excel
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Séparateur ';' + BOM UTF-8 : ouverture propre dans Excel FR ; l'intégration
-# Gery se fera par un ETL qui fait un UPDATE sur la clé. Format final à confirmer
-# avec Rémi (cf. brief §12).
-_CSV_DELIMITER = ";"
+# Séparateur '||' + BOM UTF-8 ; l'intégration Gery se fera par un ETL qui fait
+# un UPDATE sur la clé. Le module csv n'accepte qu'un délimiteur d'un caractère,
+# donc l'écriture est faite à la main (pas de guillemets : '||' ne doit pas
+# apparaître dans les valeurs, les retours à la ligne sont remplacés par un espace).
+_CSV_DELIMITER = "||"
+
+
+def _cell(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\r", " ").replace("\n", " ").replace(_CSV_DELIMITER, "|")
 
 
 def _write_csv(path: Path, columns: list[str], rows: list[dict[str, Any]]) -> None:
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=columns, delimiter=_CSV_DELIMITER, extrasaction="ignore"
-        )
-        writer.writeheader()
+        f.write(_CSV_DELIMITER.join(columns) + "\r\n")
         for row in rows:
-            writer.writerow(row)
+            f.write(_CSV_DELIMITER.join(_cell(row.get(c)) for c in columns) + "\r\n")
 
 
 def _file_hash(path: Path) -> str:

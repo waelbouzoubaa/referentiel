@@ -5,7 +5,6 @@ Le fichier NEW_ARTICLE contient créations + réactivations + lignes modifiées
 """
 from __future__ import annotations
 
-import csv
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -19,11 +18,12 @@ from middleware.parser.pivot import PricePivot, ProductPivot, VariantPivot
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """Relit un CSV Gery (séparateur ';', BOM UTF-8) → (en-têtes, lignes)."""
+    """Relit un CSV Gery (séparateur '||', BOM UTF-8) → (en-têtes, lignes)."""
     with open(path, encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f, delimiter=";")
-        rows = list(reader)
-        return list(reader.fieldnames or []), rows
+        lines = f.read().splitlines()
+    headers = lines[0].split("||") if lines else []
+    rows = [dict(zip(headers, line.split("||"))) for line in lines[1:]]
+    return headers, rows
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
