@@ -1055,6 +1055,39 @@ def _source_field(
     return source, value.strip() if isinstance(value, str) else value, extra
 
 
+def _min_qty_current(data: dict[str, Any], defaults: dict[str, Any]) -> tuple[str, str]:
+    """(source, valeur) courants de la quantité minimale : colonne si un attribut
+    `minimum_quantity` existe dans le YAML, sinon valeur fixe (défaut YAML)."""
+    attr = next(
+        (a for a in (data.get("attributes") or []) if a and a.get("key") == "minimum_quantity"),
+        None,
+    )
+    if attr:
+        return _SRC_COLUMN, attr.get("source_col") or ""
+    return _SRC_FIXED, str(int(defaults.get("minimum_quantity") or 1))
+
+
+def _apply_min_qty(
+    src: str, val: str, new_defaults: dict[str, Any], new_attributes: list[dict[str, Any]]
+) -> None:
+    """Écrit la quantité minimale dans le mapping : attribut (colonne) ou défaut (fixe).
+
+    En mode colonne, le défaut (1) sert de repli quand la cellule est vide.
+    """
+    new_attributes[:] = [a for a in new_attributes if a.get("key") != "minimum_quantity"]
+    if src == _SRC_COLUMN and val:
+        new_attributes.append(
+            {"key": "minimum_quantity", "source_col": val, "data_type": "integer"}
+        )
+        new_defaults["minimum_quantity"] = 1
+        return
+    try:
+        qty = int(float(str(val).strip().replace(",", ".")))
+    except ValueError:
+        qty = 1
+    new_defaults["minimum_quantity"] = max(qty, 1)
+
+
 def render_table_form_simple(
     data: dict[str, Any],
     pending_id: str,
@@ -1193,13 +1226,13 @@ def render_table_form_simple(
     )
     date_fmt = date_fmt or ve_date_fmt or "parse_date_fr"
 
-    with st.expander("Quantité minimale", expanded=True):
-        st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
-        min_qty = st.number_input(
-            "Quantité minimum", min_value=1, step=1,
-            value=int(defaults.get("minimum_quantity") or 1),
-            key=f"min_qty_simple_{pending_id}", label_visibility="collapsed",
-        )
+    minqty_current = _min_qty_current(data, defaults)
+    minqty_src, minqty_val, _ = _source_field(
+        "Quantité minimale",
+        "Variable selon le produit (colonne) ou identique pour toutes les lignes (valeur fixe).",
+        pending_id, "minqty", [_SRC_COLUMN, _SRC_FIXED], columns,
+        minqty_current[0], minqty_current[1],
+    )
 
     def _decimal_format_picker(container):
         options = {
@@ -1324,8 +1357,7 @@ def render_table_form_simple(
     if exclude_starts:
         new_row_filter["exclude_if_starts_with"] = exclude_starts
 
-    new_defaults.setdefault("minimum_quantity", int(min_qty))
-    new_defaults["minimum_quantity"] = int(min_qty)
+    _apply_min_qty(minqty_src, minqty_val, new_defaults, new_attributes)
     # Champs Gery pas encore utilisés dans le CSV actuel — valeurs neutres fixes.
     for k, v in {
         "item_purchase_type": "Catalogue", "code_tva": "TVA20", "purchase_type": "Direct",
@@ -1954,13 +1986,13 @@ def render_matrix_form_simple(
         detected_columns, siren_current[0], siren_current[1],
     )
 
-    with st.expander("Quantité minimale", expanded=True):
-        st.caption("Toujours une valeur fixe (identique pour toutes les lignes).")
-        min_qty = st.number_input(
-            "Quantité minimum", min_value=1, step=1,
-            value=int(defaults.get("minimum_quantity") or 1),
-            key=f"min_qty_matrix_{pending_id}", label_visibility="collapsed",
-        )
+    minqty_current = _min_qty_current(data, defaults)
+    minqty_src, minqty_val, _ = _source_field(
+        "Quantité minimale",
+        "Variable selon le produit (colonne) ou identique pour toutes les lignes (valeur fixe).",
+        pending_id, "mx_minqty", [_SRC_COLUMN, _SRC_FIXED], detected_columns,
+        minqty_current[0], minqty_current[1],
+    )
 
     with st.expander("🏷️ Code article généré (obligatoire)", expanded=True):
         attr_keys = [a.get("key") for a in (attr_out or []) if a.get("key")]
@@ -2058,7 +2090,7 @@ def render_matrix_form_simple(
     if price_letters_final:
         new_row_filter["must_have_value_in_any"] = price_letters_final
 
-    new_defaults["minimum_quantity"] = int(min_qty)
+    _apply_min_qty(minqty_src, minqty_val, new_defaults, new_attributes)
     for k, v in {
         "item_purchase_type": "Catalogue", "code_tva": "TVA20", "purchase_type": "Direct",
         "gen_prod_posting_group": "", "job_cost_code": "", "tree_code": "",

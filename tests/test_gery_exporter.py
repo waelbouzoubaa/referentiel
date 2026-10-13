@@ -14,7 +14,7 @@ import pytest
 from middleware.delta.engine import compute_delta
 from middleware.exporter.gery import _get_codes_with_prices, generate_gery_exports
 from middleware.parser.grammar import GeryExportConfig
-from middleware.parser.pivot import PricePivot, ProductPivot, VariantPivot
+from middleware.parser.pivot import AttributePivot, PricePivot, ProductPivot, VariantPivot
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -224,3 +224,38 @@ def test_validity_dates_in_new_article(tmp_path: Path) -> None:
     na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
     _, rows = _read_csv(na.path)
     assert rows[0]["Starting Date"] == start.isoformat()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — quantité minimale : colonne (attribut produit) ou valeur fixe (défaut)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _with_min_qty(code: str, raw: str | None) -> ProductPivot:
+    product = _make_simple_product(code)
+    if raw is not None:
+        product.attributes.append(
+            AttributePivot(key="minimum_quantity", value=raw, data_type="integer")
+        )
+    return product
+
+
+def test_min_qty_from_column_varies_per_product(tmp_path: Path) -> None:
+    products = [_with_min_qty("A", "10"), _with_min_qty("B", "25.0"), _with_min_qty("C", "2,5")]
+    delta = _delta_with_creates(products)
+    result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
+
+    na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
+    _, rows = _read_csv(na.path)
+    by_code = {r["Description"]: r["Minimum Quantity"] for r in rows}
+    assert by_code == {"Article A": "10", "Article B": "25", "Article C": "2.5"}
+
+
+def test_min_qty_falls_back_to_fixed_default(tmp_path: Path) -> None:
+    # A : pas d'attribut ; B : cellule vide/illisible ; C : valeur <= 0 → défaut YAML (1)
+    products = [_with_min_qty("A", None), _with_min_qty("B", "abc"), _with_min_qty("C", "0")]
+    delta = _delta_with_creates(products)
+    result = generate_gery_exports(delta, _atlantic_config(), "atlantic", tmp_path)
+
+    na = next(f for f in result.files if f.kind == "NEW_ARTICLE")
+    _, rows = _read_csv(na.path)
+    assert {r["Minimum Quantity"] for r in rows} == {"1"}

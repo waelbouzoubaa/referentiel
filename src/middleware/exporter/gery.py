@@ -170,6 +170,28 @@ def _resolve_uom(product: ProductPivot, defaults: dict[str, Any]) -> str:
     return defaults.get("unit_of_measure", "U")
 
 
+def _resolve_min_qty(product: ProductPivot, defaults: dict[str, Any]) -> int | float:
+    """Quantité minimale : attribut produit `minimum_quantity` (colonne du fichier)
+    en priorité, sinon défaut YAML (valeur fixe), sinon 1."""
+    for attr in product.attributes:
+        if attr.key == "minimum_quantity":
+            parsed = _parse_quantity(attr.value)
+            if parsed is not None:
+                return parsed
+    return defaults.get("minimum_quantity", 1)
+
+
+def _parse_quantity(raw: str) -> int | float | None:
+    """'10', '10.0', '10,5' → 10, 10, 10.5 ; vide / non numérique / <= 0 → None."""
+    try:
+        value = float(str(raw).strip().replace(",", "."))
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return int(value) if value == int(value) else value
+
+
 def _build_rows(
     deltas: list[ProductDelta],
     defaults: dict[str, Any],
@@ -197,7 +219,7 @@ def _build_rows(
                 ),
                 "Unité": _resolve_uom(p, defaults),
                 "Starting Date": validity_start.isoformat() if validity_start else None,
-                "Minimum Quantity": defaults.get("minimum_quantity", 1),
+                "Minimum Quantity": _resolve_min_qty(p, defaults),
                 "Direct Unit Cost": float(price.amount) if price else None,
                 "Ending Date": validity_end.isoformat() if validity_end else None,
                 "SIREN Fournisseur": siren_fournisseur,
