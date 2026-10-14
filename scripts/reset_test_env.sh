@@ -6,7 +6,7 @@
 #   - toutes les tables applicatives PostgreSQL (schéma public ; alembic_version conservé,
 #     schéma n8n non touché)
 #   - les fichiers en attente de validation (/app/uploads) et les exports (/app/exports)
-#   - le stockage objet MinIO (fichiers bruts archivés)
+#   (le stockage objet GCS n'est jamais purgé)
 #   - les YAML fournisseurs générés par l'IA (non versionnés dans git)
 #   - l'état persistant du watcher (delta_token.json/file_cache.json dans le volume
 #     watcher_state) — sans ça, le watcher reprendrait exactement où il en était sur
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 if [ "${1:-}" != "--yes" ]; then
-  echo "⚠️  Opération DESTRUCTIVE (base, fichiers, exports, MinIO)."
+  echo "⚠️  Opération DESTRUCTIVE (base, fichiers, exports)."
   echo "    Relance avec --yes pour confirmer :"
   echo "      bash scripts/reset_test_env.sh --yes"
   exit 1
@@ -52,12 +52,7 @@ SQL
 echo ">>> 3/7 Purge des fichiers pending et des exports..."
 docker compose exec -T api sh -c 'find /app/uploads -type f -delete 2>/dev/null; find /app/exports -type f -delete 2>/dev/null; true'
 
-echo ">>> 4/7 Purge du stockage MinIO (optionnel, non bloquant)..."
-docker compose run --rm --entrypoint sh minio-init -c \
-  'mc alias set local http://minio:9000 minioadmin minioadmin && \
-   mc rm --recursive --force local/middleware-dev || true; \
-   mc mb --ignore-existing local/middleware-dev' \
-  || echo "    (purge MinIO ignorée — sans impact sur les re-tests)"
+echo ">>> 4/7 Stockage GCS : non purgé (bucket partagé — à vider à la main si besoin)."
 
 echo ">>> 5/7 Suppression des YAML générés par l'IA (non versionnés)..."
 git clean -f config/suppliers/

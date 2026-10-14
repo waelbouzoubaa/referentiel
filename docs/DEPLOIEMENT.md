@@ -1,6 +1,6 @@
 # Déploiement sur une nouvelle VM
 
-Guide pour déployer la stack middleware-ramery (API, watcher SharePoint, PostgreSQL, MinIO) sur une VM neuve (Ubuntu/Debian).
+Guide pour déployer la stack middleware-ramery (API, watcher SharePoint, PostgreSQL ; archivage des fichiers bruts dans GCS) sur une VM neuve (Ubuntu/Debian).
 
 ## 1. Prérequis sur la VM
 
@@ -56,11 +56,9 @@ Services démarrés :
 |---|---|---|
 | API FastAPI | `http://<vm>:8000` (docs : `/docs`) | — |
 | Validation mappings IA (Streamlit) | `http://<vm>:8503` | — |
-| MinIO Console | `http://<vm>:9011` | `minioadmin` / `minioadmin` |
-| MinIO API S3 | `http://<vm>:9010` | `minioadmin` / `minioadmin` |
 | PostgreSQL | `<vm>:5432` | `middleware` / `middleware` |
 
-> ⚠️ Pour une VM accessible publiquement, changer les mots de passe par défaut (Postgres, MinIO) dans `docker-compose.yml` / `.env`, et restreindre les ports exposés via le pare-feu (seul `8000` et éventuellement `9011` doivent être accessibles depuis l'extérieur si besoin).
+> ⚠️ Pour une VM accessible publiquement, changer les mots de passe par défaut (Postgres) dans `docker-compose.yml` / `.env`, et restreindre les ports exposés via le pare-feu (seul `8000` et éventuellement `9011` doivent être accessibles depuis l'extérieur si besoin).
 
 ## 5. Migrations base de données
 
@@ -136,9 +134,9 @@ RESTART IDENTITY CASCADE;
 docker compose exec api sh -c "rm -f /app/exports/*.xlsx"
 ```
 
-**Accéder aux fichiers bruts archivés (MinIO)** :
-- Console web : `http://<vm>:9011` (`minioadmin`/`minioadmin`), bucket `middleware-dev`
-- CLI : `docker compose exec minio mc ls -r local/middleware-dev/`
+**Accéder aux fichiers bruts archivés (GCS)** :
+- Console GCP : Cloud Storage, bucket `ramery-ai-features-integration-catalogue-article`
+- Prérequis : la clé JSON du compte de service doit être dans `certs/gcs-service-account.json` sur la VM (non versionnée).
 
 **Exports Gery générés** :
 ```bash

@@ -19,3 +19,7 @@ data/output/*
 
 # Charte graphique (référence locale, trop lourde pour git)
 docs/Charte graphique 2023.pdf
+
+# Clés de compte de service GCP (ne jamais committer)
+ramery-ai-features-*.json
+gcs-service-account.json

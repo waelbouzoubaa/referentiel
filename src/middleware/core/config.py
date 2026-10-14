@@ -32,11 +32,10 @@ class Settings(BaseSettings):
     database_pool_size: int = 10
     database_max_overflow: int = 20
 
-    # ── Stockage objet ────────────────────────────────────────────────────────
-    storage_endpoint: str = "http://localhost:9000"
-    storage_bucket: str = "middleware-dev"
-    storage_access_key: str = "minioadmin"
-    storage_secret_key: str = "minioadmin"
+    # ── Stockage objet (GCS) ──────────────────────────────────────────────────
+    # Authentification : variable standard GOOGLE_APPLICATION_CREDENTIALS
+    # (chemin du JSON du compte de service), lue directement par la lib Google.
+    storage_bucket: str = "ramery-ai-features-integration-catalogue-article"
 
     # ── Dossiers locaux ───────────────────────────────────────────────────────
     input_folder: str = "/data/input"

@@ -14,7 +14,7 @@ Tout se passe sur le VPS. Les commandes sont à copier-coller.
   reconnaissance fiable. Le métier valide (ou corrige) via un formulaire simplifié
   pré-rempli par l'IA ; s'il n'y arrive pas, il clique **« 🆘 Demander l'aide du support »**
   pour que l'équipe dev traite le cas.
-- **Rien ne se perd** : base PostgreSQL + fichiers bruts (MinIO) + exports (disque), tous persistés.
+- **Rien ne se perd** : base PostgreSQL + fichiers bruts (GCS) + exports (disque), tous persistés.
 
 ---
 
@@ -28,7 +28,6 @@ cd ~/middleware-ramery
 |---|---|
 | Interface de validation (Streamlit) | https://refs-fournisseurs.devtools.maikhub.com/ (accès restreint par IP, voir `docker-compose.yml` → label `ip-allowlist`) |
 | API (santé) | http://72.60.189.114:8000/health |
-| Console MinIO (stockage brut) | http://72.60.189.114:9011 |
 
 ---
 
@@ -38,7 +37,7 @@ docker compose ps          # tous les conteneurs "Up" ; api "healthy"
 curl http://localhost:8000/health     # -> {"status":"ok","version":"0.1.0"}
 ```
 Conteneurs attendus : `middleware-api`, `middleware-review-ui`, `middleware-watcher`,
-`middleware-postgres`, `middleware-minio`.
+`middleware-postgres`.
 
 Si un conteneur est arrêté : `docker compose up -d`
 
@@ -140,7 +139,7 @@ inventées). Pour renseigner un vrai code : éditer `config/sage_codes.csv` (for
 | Mappings fournisseurs (YAML) | `config/suppliers/<code>_v1.yaml` |
 | Codes SAGE (placeholder) | `config/sage_codes.csv` |
 | Exports CSV générés | volume `exports` (`docker compose exec api ls /app/exports`) |
-| Fichiers bruts archivés | MinIO (console `:9011`) |
+| Fichiers bruts archivés | GCS (bucket `ramery-ai-features-integration-catalogue-article`) |
 | Base de données (pivot, historique) | PostgreSQL (volume `postgres_data`) |
 
 ---
@@ -168,7 +167,7 @@ inventées). Pour renseigner un vrai code : éditer `config/sage_codes.csv` (for
 
 **« Repartir d'un environnement propre pour une démo/test »**
 ```bash
-bash scripts/reset_test_env.sh --yes      # ⚠️ DESTRUCTIF : vide base, exports, pending, MinIO
+bash scripts/reset_test_env.sh --yes      # ⚠️ DESTRUCTIF : vide base, exports, pending (le bucket GCS n'est jamais purgé)
 ```
 
 **Revenir à la version précédente (rollback) si une mise à jour casse**

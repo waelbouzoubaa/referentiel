@@ -9,7 +9,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from middleware.core.logging import get_logger
-from middleware.storage.minio_client import upload_raw_file
+from middleware.storage.gcs_client import upload_raw_file
 from middleware.db.models import (
     GeryExport,
     GeryExportLine,

@@ -16,52 +16,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── Stockage objet (MinIO = GCS compatible en dev) ──────────────────────────
-  minio:
-    image: minio/minio:latest
-    container_name: middleware-minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-      MINIO_BROWSER_REDIRECT_URL: https://minio.${MAIN_DOMAIN}
-    volumes:
-      - minio_data:/data
-    #ports:
-    #  - "9010:9000"   # API S3 (9000 occupé par Portainer)
-    #  - "9011:9001"   # Console web
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - default
-      - infra_networks
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=infra_networks"
-      - "traefik.http.routers.minio.rule=Host(`minio.${MAIN_DOMAIN}`)"
-      - "traefik.http.routers.minio.entrypoints=websecure"
-      - "traefik.http.services.minio.loadbalancer.server.port=9001"
-      - "traefik.http.routers.minio.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.minio.middlewares=core-ipallowList@docker"
-
-  # ── Création du bucket au démarrage ─────────────────────────────────────────
-  minio-init:
-    image: minio/mc:latest
-    container_name: middleware-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/middleware-dev &&
-      echo 'Bucket middleware-dev créé.'
-      "
-    restart: "no"
-
   # ── Service Python FastAPI ───────────────────────────────────────────────────
   api:
     build:
@@ -73,10 +27,8 @@ services:
       - .env
     environment:
       MIDDLEWARE_DATABASE_URL: postgresql+asyncpg://middleware:middleware@middleware-postgres:5432/middleware
-      MIDDLEWARE_STORAGE_ENDPOINT: http://middleware-minio:9000
-      MIDDLEWARE_STORAGE_BUCKET: middleware-dev
-      MIDDLEWARE_STORAGE_ACCESS_KEY: minioadmin
-      MIDDLEWARE_STORAGE_SECRET_KEY: minioadmin
+      MIDDLEWARE_STORAGE_BUCKET: ramery-ai-features-integration-catalogue-article
+      GOOGLE_APPLICATION_CREDENTIALS: /app/certs/gcs-service-account.json
       MIDDLEWARE_DEBUG: "true"
       MIDDLEWARE_LOG_LEVEL: DEBUG
       MIDDLEWARE_ENVIRONMENT: development
@@ -91,10 +43,9 @@ services:
       - ./data/output:/data/output
       - uploads:/app/uploads
       - exports:/app/exports
+      - ${GCS_KEY_FILE:-./certs/gcs-service-account.json}:/app/certs/gcs-service-account.json:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     command: >
       uvicorn middleware.api.main:app
@@ -173,7 +124,6 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
   uploads:
   exports:
   watcher_state:

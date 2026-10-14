@@ -58,7 +58,7 @@ class DeltaComputationError(MiddlewareError):
 
 
 class StorageError(MiddlewareError):
-    """Erreur lors d'une opération sur le stockage objet (MinIO/GCS)."""
+    """Erreur lors d'une opération sur le stockage objet (GCS)."""
 
     def __init__(
         self,

@@ -7,7 +7,7 @@ Middleware de normalisation adaptative des catalogues Excel hétérogènes des f
 ```
 SharePoint Tempo (fournisseurs)
     ↓  Microsoft Graph /delta (watcher Python, polling 30s)
-MinIO / GCS (archivage immuable des fichiers bruts)
+GCS (archivage immuable des fichiers bruts)
     ↓
 Service Python FastAPI (parsing YAML + pivot + delta + export)
     ↓
@@ -41,7 +41,6 @@ Services démarrés :
 |---|---|
 | API FastAPI | http://localhost:8000 |
 | Docs Swagger | http://localhost:8000/docs |
-| MinIO Console | http://localhost:9001 (admin/minioadmin) |
 | PostgreSQL | localhost:5432 (middleware/middleware) |
 
 ### 3. Vérifier le démarrage
@@ -104,8 +103,8 @@ middleware-ramery/
 
 ## Notes de déploiement
 
-- **Dev** : MinIO remplace GCS pour le stockage objet.
-- **Prod** : remplacer `MIDDLEWARE_STORAGE_ENDPOINT` par l'endpoint GCS, utiliser les credentials GCP.
+- **Stockage objet** : GCS (bucket `ramery-ai-features-integration-catalogue-article`). Déposer la clé JSON du
+  compte de service dans `certs/gcs-service-account.json` (non versionné) ; le compose la monte dans l'API.
 - **Secrets** : HashiCorp Vault AppRole en prod. `.env` uniquement en dev.
 - **CI/CD** : GitLab CI (`.gitlab-ci.yml` à créer selon pipeline Ramery).
 

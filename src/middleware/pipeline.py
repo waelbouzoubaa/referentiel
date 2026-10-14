@@ -2,7 +2,7 @@
 
 Utilisé à la fois par l'endpoint `/generate-gery-exports` (fournisseur connu) et
 par la validation Streamlit `approve` (nouveau fournisseur), pour garantir le même
-comportement : archivage MinIO du fichier brut, écriture en base et génération du
+comportement : archivage GCS du fichier brut, écriture en base et génération du
 fichier Gery, de façon cohérente sur les deux chemins.
 """
 from __future__ import annotations
@@ -54,7 +54,7 @@ async def process_and_export(
 ) -> tuple[ParsingResult, DeltaResult, GeryExportResult]:
     """Traite un fichier fournisseur de bout en bout.
 
-    Parse le fichier, archive le brut en MinIO (via `get_or_create_supplier_file`),
+    Parse le fichier, archive le brut en GCS (via `get_or_create_supplier_file`),
     calcule le delta vs l'état PostgreSQL, persiste les changements, génère le fichier
     Gery puis trace l'export en base.
 

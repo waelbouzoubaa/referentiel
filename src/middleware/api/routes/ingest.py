@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from middleware.core.config import get_settings
 from middleware.core.logging import get_logger
-from middleware.storage.minio_client import upload_raw_file
+from middleware.storage.gcs_client import upload_raw_file
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -449,7 +449,7 @@ async def _generate_ai_suggestion_background(
 async def ingest_unknown(
     request: UnknownIngestRequest, background_tasks: BackgroundTasks
 ) -> UnknownIngestResponse:
-    """Reçoit un fichier inconnu, l'archive dans MinIO et crée une demande de
+    """Reçoit un fichier inconnu, l'archive dans GCS et crée une demande de
     validation — la suggestion IA (YAML + confiance) est générée en tâche de fond
     juste après, sans bloquer la réponse ni le reste de l'API.
     """
@@ -475,7 +475,7 @@ async def ingest_unknown(
     pending_id = request.pending_id or uuid.uuid4().hex
     supplier_guess = request.folder_name.lower().replace(" ", "_").replace("-", "_")
 
-    # Archive le fichier brut dans MinIO dès la détection
+    # Archive le fichier brut dans GCS dès la détection
     content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()[:12]
     minio_path = await upload_raw_file(file_path, supplier_guess, content_hash)
 

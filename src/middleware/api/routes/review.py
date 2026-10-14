@@ -404,7 +404,7 @@ class ApproveResult(BaseModel):
 async def approve_pending(
     pending_id: str, session: AsyncSession = Depends(get_session)
 ) -> ApproveResult:
-    """Approuve le YAML, le sauvegarde, puis traite le fichier (DB + MinIO + export CSV)."""
+    """Approuve le YAML, le sauvegarde, puis traite le fichier (DB + GCS + export CSV)."""
     meta = _load_pending(pending_id)
 
     if meta["status"] not in ("pending", "needs_support"):
@@ -442,7 +442,7 @@ async def approve_pending(
             supplier_code=supplier_code,
         )
 
-    # Traitement complet via le service partagé (archivage MinIO, DB, export CSV)
+    # Traitement complet via le service partagé (archivage GCS, DB, export CSV)
     try:
         EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
         parse_result, _, export_result = await process_and_export(
