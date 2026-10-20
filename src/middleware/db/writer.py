@@ -418,10 +418,15 @@ async def persist_gery_export(
     export_result: GeryExportResult,
     supplier_id: uuid.UUID,
     file_id: uuid.UUID,
-) -> None:
-    """Persiste les exports Gery en base : GeryExport + GeryExportLine + marque product_history."""
+) -> dict[Path, GeryExport]:
+    """Persiste les exports Gery en base : GeryExport + GeryExportLine + marque product_history.
+
+    Retourne les GeryExport créés, indexés par chemin du fichier généré (pour suivre
+    ensuite leur livraison).
+    """
+    created: dict[Path, GeryExport] = {}
     if not export_result.files:
-        return
+        return created
 
     # Récupère les IDs produits par supplier_product_code (1 seule requête)
     all_spc = {rd.supplier_product_code for f in export_result.files for rd in f.row_details}
@@ -447,6 +452,7 @@ async def persist_gery_export(
         )
         session.add(gery_export)
         await session.flush()
+        created[gen_file.path] = gery_export
 
         for line_number, detail in enumerate(gen_file.row_details, start=1):
             product_id = product_id_map.get(detail.supplier_product_code)
@@ -483,6 +489,7 @@ async def persist_gery_export(
         fichiers=len([f for f in export_result.files if f.line_count > 0]),
         lignes=sum(f.line_count for f in export_result.files),
     )
+    return created
 
 
 def _file_hash(path: Path) -> str:

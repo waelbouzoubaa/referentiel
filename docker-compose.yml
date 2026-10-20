@@ -29,6 +29,7 @@ services:
       MIDDLEWARE_DATABASE_URL: postgresql+asyncpg://middleware:middleware@middleware-postgres:5432/middleware
       MIDDLEWARE_STORAGE_BUCKET: ramery-ai-features-integration-catalogue-article
       GOOGLE_APPLICATION_CREDENTIALS: /app/certs/gcs-service-account.json
+      CERT_PRIVATE_KEY_PATH: /app/certs/private_key.pem
       MIDDLEWARE_DEBUG: "true"
       MIDDLEWARE_LOG_LEVEL: DEBUG
       MIDDLEWARE_ENVIRONMENT: development
@@ -44,6 +45,7 @@ services:
       - uploads:/app/uploads
       - exports:/app/exports
       - ${GCS_KEY_FILE:-./certs/gcs-service-account.json}:/app/certs/gcs-service-account.json:ro
+      - ./certs/maikhub-middleware-ramery.key:/app/certs/private_key.pem:ro
     depends_on:
       postgres:
         condition: service_healthy

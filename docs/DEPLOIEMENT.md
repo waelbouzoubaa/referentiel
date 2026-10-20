@@ -138,6 +138,12 @@ docker compose exec api sh -c "rm -f /app/exports/*.xlsx"
 - Console GCP : Cloud Storage, bucket `ramery-ai-features-integration-catalogue-article`
 - Prérequis : la clé JSON du compte de service doit être dans `certs/gcs-service-account.json` sur la VM (non versionnée).
 
+**Dépôt des exports Gery dans SharePoint (dossier `Out`)** :
+- Activer dans le `.env` : `MIDDLEWARE_SHAREPOINT_OUT_ENABLED=true`, `MIDDLEWARE_SHAREPOINT_OUT_SITE_PATH=/sites/exports-gery`, `MIDDLEWARE_SHAREPOINT_OUT_FOLDER=Out`, puis `docker compose up -d api`.
+- Authentification : mêmes variables que le watcher (`TENANT_ID`, `CLIENT_ID`, `CERT_THUMBPRINT` ou `CLIENT_SECRET`, `SHAREPOINT_HOST`) ; la clé du certificat est montée dans l'API (`certs/maikhub-middleware-ramery.key`).
+- L'application Azure doit pouvoir écrire sur ce site. Un fichier déjà présent n'est jamais écrasé.
+- Suivi : table `gery_exports` (`status` = `delivered` ou `failed`, `delivered_at`, `ack_message` = motif d'échec) ; logs `export Gery déposé dans SharePoint` / `dépôt SharePoint … échoué`.
+
 **Exports Gery générés** :
 ```bash
 docker compose exec api ls -la /app/exports

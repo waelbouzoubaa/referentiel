@@ -7,11 +7,14 @@ fichier Gery, de façon cohérente sur les deux chemins.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from middleware.core.config import get_settings
 from middleware.core.logging import get_logger
+from middleware.db.models import GeryExport
 from middleware.db.writer import (
     get_known_hashes,
     get_or_create_supplier,
@@ -28,8 +31,42 @@ from middleware.parser.multi_table_extractor import parse_multi_table_file
 from middleware.parser.pivot import ParsingResult
 from middleware.parser.table_extractor import parse_table_file
 from middleware.sage_codes import resolve_sage_code
+from middleware.storage.sharepoint_out import deliver_file
 
 logger = get_logger(__name__)
+
+
+async def deliver_exports_to_sharepoint(
+    export_result: GeryExportResult, db_exports: dict[Path, GeryExport]
+) -> None:
+    """Dépose chaque fichier Gery généré dans le dossier Out du SharePoint et trace le résultat.
+
+    Sans effet si SHAREPOINT_OUT_ENABLED est faux. Best-effort : un échec est enregistré
+    (`gery_exports.status = 'failed'` + message) mais n'interrompt jamais le traitement.
+    """
+    if not get_settings().sharepoint_out_enabled:
+        return
+    for gen_file in export_result.files:
+        gery_export = db_exports.get(gen_file.path)
+        if gery_export is None:  # fichier vide : rien n'a été enregistré ni à livrer
+            continue
+        result = await deliver_file(gen_file.path)
+        if result.ok:
+            gery_export.status = "delivered"
+            gery_export.delivered_at = datetime.now(UTC)
+            logger.info(
+                "export Gery déposé dans SharePoint",
+                fichier=gen_file.path.name,
+                url=result.web_url,
+            )
+        else:
+            gery_export.status = "failed"
+            gery_export.ack_message = result.error
+            logger.warning(
+                "dépôt SharePoint de l'export Gery échoué — traitement continue",
+                fichier=gen_file.path.name,
+                erreur=result.error,
+            )
 
 
 def parse_with_rule(path: Path, rule: MappingRule) -> ParsingResult:
@@ -97,7 +134,8 @@ async def process_and_export(
         siren_fournisseur=result.file_metadata.siren_fournisseur,
     )
 
-    await persist_gery_export(session, export_result, supplier.id, supplier_file.id)
+    db_exports = await persist_gery_export(session, export_result, supplier.id, supplier_file.id)
+    await deliver_exports_to_sharepoint(export_result, db_exports)
     await mark_file_processed(session, supplier_file)
 
     logger.info(
