@@ -64,20 +64,26 @@ def _resolve_tag_field_name(drive_id):
                 return
         print(
             f"  → ATTENTION : colonne '{TAG_COLUMN_NAME}' introuvable dans la bibliothèque "
-            f"SharePoint. Le filtre par tag est désactivé (tous les fichiers sont traités)."
+            f"SharePoint. AUCUN fichier ne sera traité tant qu'elle n'existe pas "
+            f"(créez-la, puis mettez '{TAG_COLUMN_READY_VALUE}' sur les fichiers à traiter)."
         )
     except Exception as exc:
-        print(f"  → Impossible de résoudre la colonne de tag ({exc}). Le filtre par tag est désactivé.")
+        print(
+            f"  → Impossible de résoudre la colonne de tag ({exc}). "
+            f"AUCUN fichier ne sera traité tant qu'elle n'est pas lisible."
+        )
 
 
 def _is_tagged_ready(item) -> bool:
     """True si le fichier porte TAG_COLUMN_NAME == TAG_COLUMN_READY_VALUE.
 
-    Si la colonne n'a pas pu être résolue (absente de la bibliothèque), le filtre
-    est désactivé et tout fichier est considéré comme prêt (comportement historique).
+    Seule cette valeur (par défaut « Oui ») déclenche le traitement ; « Non », vide ou
+    toute autre valeur est ignoré. Si la colonne n'a pas pu être résolue (absente de la
+    bibliothèque), AUCUN fichier n'est traité : un tag manquant ne doit jamais envoyer
+    tous les fichiers d'un coup.
     """
     if _tag_field_internal_name is None:
-        return True
+        return False
 
     drive_id = item.get("parentReference", {}).get("driveId")
     item_id = item["id"]
